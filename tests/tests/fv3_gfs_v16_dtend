@@ -78,7 +78,7 @@ export FHZERO=1
 export LDIAG3D=.true.
 export QDIAG3D=.true.
 export MAX_OUTPUT_FIELDS=400
-export DIAG_TABLE=diag_table_gfs_v16_dtend
+export DIAG_TABLE_ADDITIONAL=diag_additional_gfs_v16_dtend
 
 export FHMAX="06"
 DT_ATMOS="1200"
