@@ -1,6 +1,6 @@
 ###############################################################################
 #
-#  FV3 CCPP GSD (GF CU + Thompson MP + MYNN PBL + RUC LSM) full (0-48h) test
+#  FV3 CCPP GSD (GF CU + Thompson MP + MYNN PBL + RUC LSM) plus extra diagnostics
 #
 ###############################################################################
 

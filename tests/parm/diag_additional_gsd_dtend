@@ -1,3 +1,6 @@
+# This file contains diag_table entries for 3D diagnostic tendencies from the fv3_gsd_v0 suite.
+# It should be appended to the end of the diag_table before execution of the test.
+
 # Old d*3dt variables, renamed from their new names:
 
 "gfs_phys", "dtend_temp_lw",        "dt3dt_lw",          "fv3_history", "all", .false., "none", 2
