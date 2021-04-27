@@ -114,14 +114,6 @@ export INPUT_NML=gsd.nml.IN
 
 export HYBEDMF=.F.
 export DO_MYNNEDMF=.T.
-<<<<<<< HEAD:tests/tests/fv3_ccpp_rrfs_v1beta
-export IMFSHALCNV=-1
-export IMFDEEPCNV=-1
-export LSM=2
-export LSOIL_LSM=4
-export GWD_OPT=3
-=======
->>>>>>> gsl/gsl/develop:tests/tests/fv3_gsd_mynnsfc
 export DO_MYNNSFCLAY=.T.
 export IMFSHALCNV=3
 export IMFDEEPCNV=3
