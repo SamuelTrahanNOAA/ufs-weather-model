@@ -1,10 +1,10 @@
 ###############################################################################
 #
-#  FV3 GFDL-MP test
+#  FV3 CCPP GFDL-MP test
 #
 ###############################################################################
 
-export TEST_DESCR="Compare FV3 GFDL-MP results with previous trunk version"
+export TEST_DESCR="Compare FV3 CCPP GFDL-MP results with previous trunk version"
 
 export CNTL_DIR=fv3_gfdlmp
 
@@ -53,7 +53,6 @@ export LIST_FILES="atmos_4xdaily.tile1.nc \
 
 
 export_fv3
-export NODES=$(expr $TASKS / $TPN + 1)
 
 DT_ATMOS="1200"
 export OUTPUT_GRID="'gaussian_grid'"
@@ -61,7 +60,7 @@ export OUTPUT_FILE="'nemsio'"
 export WRITE_NEMSIOFLIP=.true.
 export WRITE_FSYNCFLAG=.true.
 
-export INPUT_NML=gfdlmp.nml.IN
 export FV3_RUN=gfdlmp_run.IN
+export CCPP_SUITE=FV3_GFS_2017_gfdlmp
+export INPUT_NML=gfdlmp.nml.IN
 
-RUN_SCRIPT=rt_fv3.sh
