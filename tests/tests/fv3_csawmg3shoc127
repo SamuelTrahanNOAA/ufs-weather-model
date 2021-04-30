@@ -1,10 +1,10 @@
 ###############################################################################
 #
-#  FV3 CSAWMG3SHOC127 test
+#  FV3 CCPP CSAWMGSHOC test
 #
 ###############################################################################
 
-export TEST_DESCR="Compare 127 L FV3 with CSAW MG3 and SHOC results with previous trunk version"
+export TEST_DESCR="Compare FV3 CCPP csawmgshoc results with previous trunk version"
 
 export CNTL_DIR=fv3_csawmg3shoc127
 
@@ -63,7 +63,6 @@ export TASKS=204
 export WRITE_GROUP=1
 export WRTTASK_PER_GROUP=12
 
-export NODES=$(expr $TASKS / $TPN + 1)
 
 export INPES='4'
 export JNPES='8'
@@ -78,4 +77,5 @@ export OUTPUT_FILE="'nemsio'"
 export WRITE_NEMSIOFLIP=.true.
 export WRITE_FSYNCFLAG=.true.
 
-RUN_SCRIPT=rt_fv3.sh
+export CCPP_SUITE=FV3_GFS_2017_csawmgshoc
+

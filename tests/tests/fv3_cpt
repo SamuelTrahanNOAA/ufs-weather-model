@@ -1,10 +1,10 @@
 ###############################################################################
 #
-#  FV3 CPT test
+#  FV3 CCPP CPT test
 #
 ###############################################################################
 
-export TEST_DESCR="Compare FV3 CPT results with previous trunk version"
+export TEST_DESCR="Compare FV3 CCPP CPT results with previous trunk version"
 
 export CNTL_DIR=fv3_cpt
 
@@ -72,7 +72,6 @@ export TASKS=204
 export WRITE_GROUP=1
 export WRTTASK_PER_GROUP=12
 
-export NODES=$(expr $TASKS / $TPN + 1)
 
 export INPES='4'
 export JNPES='8'
@@ -83,9 +82,9 @@ export NPZP='128'
 
 export INPUT_NML=cpt.nml.IN
 export FV3_RUN=cpt_run.IN
+export CCPP_SUITE=FV3_CPT_v0
 export OUTPUT_GRID="'gaussian_grid'"
 export OUTPUT_FILE="'nemsio'"
 export WRITE_NEMSIOFLIP=.true.
 export WRITE_FSYNCFLAG=.true.
 
-RUN_SCRIPT=rt_fv3.sh

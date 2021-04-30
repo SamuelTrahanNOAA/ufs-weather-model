@@ -1,10 +1,10 @@
 ###############################################################################
 #
-#  FV3 c192 Gaussian grid nemsio output test
+#  FV3 CCPP c192 Gaussian grid nemsio output test
 #
-################################################################################
+###############################################################################
 
-export TEST_DESCR="Compare FV3 c192 Gaussian grid nemsio output results with previous trunk version"
+export TEST_DESCR="Compare FV3 CCPP c192 Gaussian grid nemsio output results with previous trunk version"
 
 export CNTL_DIR=fv3_wrtGauss_nemsio_c192
 
@@ -79,7 +79,8 @@ export FNVETC="'global_vegtype.igbp.t382.768.384.rg.grb',"
 export FNSOTC="'global_soiltype.statsgo.t382.768.384.rg.grb',"
 export FNSMCC="'global_soilmgldas.t382.768.384.grb',"
 export FNABSC="'global_mxsnoalb.uariz.t382.768.384.rg.grb',"
-export NODES=$(expr $TASKS / $TPN + 1)
 
-#
-RUN_SCRIPT=rt_fv3.sh
+export FV3_RUN=control_run.IN
+export CCPP_SUITE=FV3_GFS_2017
+export INPUT_NML=control.nml.IN
+
