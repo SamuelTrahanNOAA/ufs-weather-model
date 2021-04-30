@@ -1,6 +1,6 @@
 ###############################################################################
 #
-#  FV3 CCPP RRFS (Thompson MP + MYNN PBL + NOAHMP LSM + MYNN SFC + GSL DRAG) test
+#  FV3 CCPP RRFS (Thompson MP + MYNN PBL + NOAHMP LSM + MYNN SFC + CIRES UGWP/GFS GWD) test
 #
 ###############################################################################
 
@@ -26,18 +26,6 @@ export LIST_FILES="atmos_4xdaily.tile1.nc \
                    phyf024.tile4.nc \
                    phyf024.tile5.nc \
                    phyf024.tile6.nc \
-                   phyf027.tile1.nc \
-                   phyf027.tile2.nc \
-                   phyf027.tile3.nc \
-                   phyf027.tile4.nc \
-                   phyf027.tile5.nc \
-                   phyf027.tile6.nc \
-                   phyf048.tile1.nc \
-                   phyf048.tile2.nc \
-                   phyf048.tile3.nc \
-                   phyf048.tile4.nc \
-                   phyf048.tile5.nc \
-                   phyf048.tile6.nc \
                    dynf000.tile1.nc \
                    dynf000.tile2.nc \
                    dynf000.tile3.nc \
@@ -50,18 +38,6 @@ export LIST_FILES="atmos_4xdaily.tile1.nc \
                    dynf024.tile4.nc \
                    dynf024.tile5.nc \
                    dynf024.tile6.nc \
-                   dynf027.tile1.nc \
-                   dynf027.tile2.nc \
-                   dynf027.tile3.nc \
-                   dynf027.tile4.nc \
-                   dynf027.tile5.nc \
-                   dynf027.tile6.nc \
-                   dynf048.tile1.nc \
-                   dynf048.tile2.nc \
-                   dynf048.tile3.nc \
-                   dynf048.tile4.nc \
-                   dynf048.tile5.nc \
-                   dynf048.tile6.nc \
                    RESTART/coupler.res \
                    RESTART/fv_core.res.nc \
                    RESTART/fv_core.res.tile1.nc \
@@ -96,9 +72,8 @@ export LIST_FILES="atmos_4xdaily.tile1.nc \
                    RESTART/sfc_data.tile6.nc"
 
 export_fv3
-export NODES=$(expr $TASKS / $TPN + 1)
 
-export FHMAX=48
+export FHMAX=24
 export FDIAG=3
 
 export DT_ATMOS="600"
@@ -119,9 +94,15 @@ export IMFSHALCNV=-1
 export IMFDEEPCNV=-1
 export LSM=2
 export LSOIL_LSM=4
-export GWD_OPT=3
+#export GWD_OPT=3
+#export DO_UGWP_V0=.F.
+#export DO_UGWP_V0_OROG_ONLY=.F.
+#export DO_GSL_DRAG_LS_BL=.T.
+#export DO_GSL_DRAG_SS=.T.
+#export DO_GSL_DRAG_TOFD=.T.
+#export DO_UGWP_V1=.F.
+#export DO_UGWP_V1_OROG_ONLY=.F.
 export DO_MYNNSFCLAY=.T.
 
-RUN_SCRIPT=rt_fv3.sh
 
 export WLCLK=30
