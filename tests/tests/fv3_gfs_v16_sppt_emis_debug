@@ -6,7 +6,7 @@
 
 export TEST_DESCR="Compare FV3 32bit CCPP GFS v16 with chemistry and emissions perturbations with previous version"
 
-export CNTL_DIR=fv3_gfs_v16_sppt_emis
+export CNTL_DIR=fv3_gfs_v16_sppt_emis_debug
 
 export LIST_FILES="atmos_4xdaily.tile1.nc \
                    atmos_4xdaily.tile2.nc \
