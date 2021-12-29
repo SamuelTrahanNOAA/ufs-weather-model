@@ -6,7 +6,7 @@
 
 export TEST_DESCR="HRRR physics on 13km domain, with radar-derived MP temperature tendencies for 1 hour"
 
-export CNTL_DIR=hrrr_da_radar_tten
+export CNTL_DIR=rrfs_conus13km_radar_tten_warm
 
 export LIST_FILES="sfcf002.nc \
                    atmf002.nc"
@@ -88,8 +88,8 @@ export DO_GSL_DRAG_TOFD=.true.
 export DO_UGWP_V1=.false.
 export DO_UGWP_V1_OROG_ONLY=.false.
 
-export FV3_RUN=hrrr_da_run.IN
-export INPUT_NML=hrrr_13km.nml.IN
+export FV3_RUN=rrfs_warm_run.IN
+export INPUT_NML=rrfs_conus13km_hrrr.nml.IN
 export FIELD_TABLE=field_table_hrrr
 export DIAG_TABLE=diag_table_hrrr
-export MODEL_CONFIGURE=model_configure_hrrr_13km.IN
+export MODEL_CONFIGURE=model_configure_rrfs_conus13km.IN

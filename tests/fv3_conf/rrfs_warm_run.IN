@@ -3,12 +3,12 @@ mkdir INPUT RESTART
 
 OPNREQ_TEST=${OPNREQ_TEST:-false}
 SUFFIX=${RT_SUFFIX}
-cp -r @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/INPUT/* INPUT/
-cp    @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/global* .
-cp    @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/CFSR.SEAICE.1982.2012.monthly.clim.grb .
-cp    @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/RTGSST.1982.2012.monthly.clim.grb .
-cp    @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/seaice_newland.grb .
-cp    @[INPUTDATA_ROOT]/FV3_input_data_hrrr_da_13km/Thompson_MP_MONTHLY_CLIMO.nc .
+cp -r @[INPUTDATA_ROOT]/FV3_input_data_conus13km/INPUT/* INPUT/
+cp    @[INPUTDATA_ROOT]/FV3_input_data_conus13km/global* .
+cp    @[INPUTDATA_ROOT]/FV3_input_data_conus13km/CFSR.SEAICE.1982.2012.monthly.clim.grb .
+cp    @[INPUTDATA_ROOT]/FV3_input_data_conus13km/RTGSST.1982.2012.monthly.clim.grb .
+cp    @[INPUTDATA_ROOT]/FV3_input_data_conus13km/seaice_newland.grb .
+cp    @[INPUTDATA_ROOT]/FV3_input_data_conus13km/Thompson_MP_MONTHLY_CLIMO.nc .
 
 touch data_table
 
