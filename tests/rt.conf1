@@ -1,0 +1,2 @@
+ COMPILE | -DAPP=ATM -DCCPP_SUITES=FV3_GFS_v16_flake -D32BIT=ON |  | fv3 |
+ RUN     | control_flake
