@@ -148,6 +148,7 @@ deflate_level=1
   isot         = 1
   lsoil        = 4
   lsm          = 1
+  lkm          = 1
   iopt_dveg    = 1
   iopt_crs     = 1
   iopt_btr     = 1
