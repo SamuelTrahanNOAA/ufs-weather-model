@@ -1,6 +1,6 @@
 [submodule "FV3"]
   path = FV3
-  url = https://github.com/SamuelTrahan-NOAA/fv3atm
+  url = ssh://git@github.com/SamuelTrahan-NOAA/fv3atm
   branch = clm-lake.v7
 [submodule "WW3"]
   path = WW3
