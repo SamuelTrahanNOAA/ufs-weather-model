@@ -25,11 +25,12 @@ export OZ_PHYS_OLD=.false.
 export OZ_PHYS_NEW=.true.
 export H2O_PHYS=.true.
 export HYBEDMF=.false.
-export RESTART_INTERVAL="12 -1"
+export RESTART_INTERVAL="1 -1"
 export WRITE_DOPOST=.true.
 export POSTAPP='lam'
 export OUTPUT_FH="1 -1"
 
+export LKM=1
 export CCPP_SUITE=FV3_HRRR
 export INPUT_NML=regional_stoch.nml.IN
 export MODEL_CONFIGURE=model_configure_regional_stoch.IN

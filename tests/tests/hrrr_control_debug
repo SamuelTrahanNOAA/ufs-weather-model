@@ -1,4 +1,4 @@
-###############################################################################
+##############################################################################
 #
 #  HRRR debug control test: atmosphere only at C96L127
 #
@@ -35,6 +35,7 @@ export NEW_DIAGTABLE=diag_table_rap
 
 export SFCLAY_COMPUTE_FLUX=.true.
 
+export LKM=1
 export IMP_PHYSICS=8
 export DNATS=0
 export DO_SAT_ADJ=.false.
