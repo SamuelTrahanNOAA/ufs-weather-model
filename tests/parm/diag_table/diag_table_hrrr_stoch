@@ -325,6 +325,7 @@
 "gfs_sfc",     "flhc",         "flhc",          "fv3_history2d",  "all",  .false.,  "none",  2
 "gfs_sfc",     "flqc",         "flqc",          "fv3_history2d",  "all",  .false.,  "none",  2
 # Prognostic/diagnostic variables from RUC LSM
+"gfs_sfc",     "rhofr",             "rhofr",        "fv3_history2d",  "all",  .false.,  "none",  2
 "gfs_sfc",     "snowfall_acc_land", "snacc_land",   "fv3_history2d",  "all",  .false.,  "none",  2
 "gfs_sfc",     "acsnow_land",       "accswe_land",  "fv3_history2d",  "all",  .false.,  "none",  2
 "gfs_sfc",     "snowfall_acc_ice",  "snacc_ice",    "fv3_history2d",  "all",  .false.,  "none",  2
