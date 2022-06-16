@@ -43,6 +43,12 @@ export DECFL=8
 export RRFS_SMOKE=.true.
 export SEAS_OPT=0
 
+if [[ "$CREATE_BASELINE" == true ]] ; then
+  export USE_IO_NETCDF=.false.
+else
+  export USE_IO_NETCDF=.true.
+fi
+
 export LKM=1
 export SFCLAY_COMPUTE_FLUX=.true.
 export IALB=2

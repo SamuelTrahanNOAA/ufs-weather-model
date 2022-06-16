@@ -35,6 +35,12 @@ export FHROT=1
 export RESTART_FILE_PREFIX=$( printf %04d%02d%02d.%02d0000 $SYEAR $SMONTH $SDAY $(( SHOUR+FHROT )) )
 export RRFS_RESTART=YES
 
+if [[ "$CREATE_BASELINE" == true ]] ; then
+  export USE_IO_NETCDF=.false.
+else
+  export USE_IO_NETCDF=.true.
+fi
+
 # Revert these two to GFS_typedefs defaults to avoid a crash:
 export SEDI_SEMI=.false.
 export DECFL=8

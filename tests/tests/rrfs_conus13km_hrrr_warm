@@ -36,6 +36,12 @@ export OUTPUT_HISTORY=.true.
 export OUTPUT_GRID=lambert_conformal
 export OUTPUT_FILE="'netcdf'"
 
+if [[ "$CREATE_BASELINE" == true ]] ; then
+  export USE_IO_NETCDF=.false.
+else
+  export USE_IO_NETCDF=.true.
+fi
+
 # Revert these two to GFS_typedefs defaults to avoid a crash:
 export SEDI_SEMI=.false.
 export DECFL=8
