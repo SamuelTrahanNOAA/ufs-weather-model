@@ -1,0 +1,4010 @@
+Only in update-rrfs-dev-20220614/FV3/ccpp/data: blerp
+Only in update-rrfs-dev-20220614/FV3/ccpp/data: c
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/data/CCPP_typedefs.meta update-rrfs-dev-20220614/FV3/ccpp/data/CCPP_typedefs.meta
+--- gsl-develop-20220614/FV3/ccpp/data/CCPP_typedefs.meta	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/data/CCPP_typedefs.meta	2022-06-15 02:21:14.000000000 +0000
+@@ -739,20 +739,6 @@
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
+-[evbs]
+-  standard_name = soil_upward_latent_heat_flux
+-  long_name = soil upward latent heat flux
+-  units = W m-2
+-  dimensions = (horizontal_loop_extent)
+-  type = real
+-  kind = kind_phys
+-[evcw]
+-  standard_name = canopy_upward_latent_heat_flux
+-  long_name = canopy upward latent heat flux
+-  units = W m-2
+-  dimensions = (horizontal_loop_extent)
+-  type = real
+-  kind = kind_phys
+ [pah]
+   standard_name = total_precipitation_advected_heat
+   long_name = precipitation advected heat - total
+@@ -1894,13 +1880,6 @@
+   dimensions = (horizontal_loop_extent,vertical_layer_dimension)
+   type = real
+   kind = kind_phys
+-[sbsno]
+-  standard_name = snow_deposition_sublimation_upward_latent_heat_flux
+-  long_name = latent heat flux from snow depo/subl
+-  units = W m-2
+-  dimensions = (horizontal_loop_extent)
+-  type = real
+-  kind = kind_phys
+ [scmpsw]
+   standard_name = components_of_surface_downward_shortwave_fluxes
+   long_name = derived type for special components of surface downward shortwave fluxes
+@@ -2101,13 +2080,6 @@
+   units = flag
+   dimensions = ()
+   type = logical
+-[trans]
+-  standard_name = transpiration_flux
+-  long_name = total plant transpiration rate
+-  units = W m-2
+-  dimensions = (horizontal_loop_extent)
+-  type = real
+-  kind = kind_phys
+ [tseal]
+   standard_name = surface_skin_temperature_for_nsst
+   long_name = ocean surface skin temperature
+Only in update-rrfs-dev-20220614/FV3/ccpp/data: g
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/data/GFS_typedefs.F90 update-rrfs-dev-20220614/FV3/ccpp/data/GFS_typedefs.F90
+--- gsl-develop-20220614/FV3/ccpp/data/GFS_typedefs.F90	2022-06-14 20:56:46.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/data/GFS_typedefs.F90	2022-06-15 02:26:31.000000000 +0000
+@@ -33,7 +33,6 @@
+ 
+    real(kind=kind_phys), parameter :: limit_unspecified = 1e12 !< special constant for "namelist value was not provided" in radar-derived temperature tendency limit range
+ 
+-
+ !> \section arg_table_GFS_typedefs
+ !! \htmlinclude GFS_typedefs.html
+ !!
+@@ -375,6 +374,8 @@
+     real (kind=kind_phys), pointer :: tsnow_ice(:)       => null()  !< RUC LSM: snow temperature at the bottom of the first snow layer over ice
+     real (kind=kind_phys), pointer :: snowfallac_land(:) => null()  !< ruc lsm diagnostics over land
+     real (kind=kind_phys), pointer :: snowfallac_ice(:)  => null()  !< ruc lsm diagnostics over ice
++    real (kind=kind_phys), pointer :: acsnow_land(:)     => null()  !< ruc lsm diagnostics over land
++    real (kind=kind_phys), pointer :: acsnow_ice(:)      => null()  !< ruc lsm diagnostics over ice
+ 
+     !  MYNN surface layer
+     real (kind=kind_phys), pointer :: ustm (:)         => null()  !u* including drag
+@@ -1149,6 +1150,10 @@
+ 
+ !--- potential temperature definition in surface layer physics
+     logical              :: thsfc_loc       !< flag for local vs. standard potential temperature
++!--- flux method in 2-m diagnostics
++    logical              :: diag_flux       !< flag for flux method in 2-m diagnostics
++!--- log method in 2-m diagnostics (for stable conditions)
++    logical              :: diag_log        !< flag for log method in 2-m diagnostics (for stable conditions)
+ 
+ !--- vertical diffusion
+     real(kind=kind_phys) :: xkzm_m          !< [in] bkgd_vdif_m  background vertical diffusion for momentum
+@@ -1206,9 +1211,14 @@
+                                               ! 2 - scheme from Draper, JHM, 2021.
+     real(kind=kind_phys) :: sppt_amp          ! pjp cloud perturbations
+     integer              :: n_var_lndp
+-    ! next two are duplicated here to support lndp_type=1. If delete that scheme, could remove from GFS defs?
+-    character(len=3)    , pointer :: lndp_var_list(:)
+-    real(kind=kind_phys), pointer :: lndp_prt_list(:)
++    logical              :: lndp_each_step    ! flag to indicate that land perturbations are applied at every time step,
++                                              ! otherwise they are applied only after gcycle is run
++    character(len=3)    , pointer :: lndp_var_list(:)  ! dimension here must match  n_var_max_lndp in  stochy_nml_def
++    real(kind=kind_phys), pointer :: lndp_prt_list(:)  ! dimension here must match  n_var_max_lndp in  stochy_nml_def
++                                              ! also previous code had dimension 5 for each pert, to allow
++                                              ! multiple patterns. It wasn't fully coded (and wouldn't have worked
++                                              ! with nlndp>1, so I just dropped it). If we want to code it properly,
++                                              ! we'd need to make this dim(6,5).
+     logical              :: do_spp            ! Overall flag to turn on SPP or not
+     integer              :: spp_pbl
+     integer              :: spp_sfc
+@@ -1640,15 +1650,21 @@
+                                                !        %upfx0    - clear sky upward lw flux at toa (w/m**2)
+ 
+ ! Input/output - used by physics
+-    real (kind=kind_phys), pointer :: srunoff(:)     => null()   !< surface water runoff (from lsm)
+-    real (kind=kind_phys), pointer :: evbsa  (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: evcwa  (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: snohfa (:)     => null()   !< noah lsm diagnostics
++    real (kind=kind_phys), pointer :: srunoff(:)     => null()   !< accumulated surface storm runoff (from lsm)
++    real (kind=kind_phys), pointer :: evbsa  (:)     => null()   !< accumulated direct evaporation
++    real (kind=kind_phys), pointer :: evcwa  (:)     => null()   !< accumulated canopy evaporation
++    real (kind=kind_phys), pointer :: snohfa (:)     => null()   !< heat flux for phase change of snow (melting)
++    real (kind=kind_phys), pointer :: transa (:)     => null()   !< accumulated transpiration
++    real (kind=kind_phys), pointer :: sbsnoa (:)     => null()   !< accumulated snow sublimation
++    real (kind=kind_phys), pointer :: snowca (:)     => null()   !< snow cover
++    real (kind=kind_phys), pointer :: sbsno  (:)     => null()   !< instantaneous snow sublimation
++    real (kind=kind_phys), pointer :: evbs(:)        => null()   !< instantaneous direct evaporation
++    real (kind=kind_phys), pointer :: trans  (:)     => null()   !< instantaneous transpiration
++    real (kind=kind_phys), pointer :: evcw(:)        => null()   !< instantaneous canopy evaporation
++    real (kind=kind_phys), pointer :: snowmt_land(:) => null()   !< ruc lsm diagnostics over land
++    real (kind=kind_phys), pointer :: snowmt_ice(:)  => null()   !< ruc lsm diagnostics over ice
++    real (kind=kind_phys), pointer :: soilm  (:)     => null()   !< integrated soil moisture
+     real (kind=kind_phys), pointer :: paha   (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: transa (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: sbsnoa (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: snowca (:)     => null()   !< noah lsm diagnostics
+-    real (kind=kind_phys), pointer :: soilm  (:)     => null()   !< soil moisture
+     real (kind=kind_phys), pointer :: tmpmin (:)     => null()   !< min temperature at 2m height (k)
+     real (kind=kind_phys), pointer :: tmpmax (:)     => null()   !< max temperature at 2m height (k)
+     real (kind=kind_phys), pointer :: dusfc  (:)     => null()   !< u component of surface stress
+@@ -1901,9 +1917,6 @@
+       procedure :: phys_zero => diag_phys_zero
+   end type GFS_diag_type
+ 
+-!----------------------------------------------------------
+-! combined type of all of the above except GFS_control_type
+-!----------------------------------------------------------
+ !! \section arg_table_GFS_data_type
+ !! \htmlinclude GFS_data_type.html
+ !!
+@@ -2381,6 +2394,8 @@
+        allocate (Sfcprop%tsnow_ice       (IM))
+        allocate (Sfcprop%snowfallac_land (IM))
+        allocate (Sfcprop%snowfallac_ice  (IM))
++       allocate (Sfcprop%acsnow_land     (IM))
++       allocate (Sfcprop%acsnow_ice      (IM))
+        !
+        Sfcprop%wetness         = clear_val
+        Sfcprop%sh2o            = clear_val
+@@ -2397,6 +2412,8 @@
+        Sfcprop%tsnow_ice       = clear_val
+        Sfcprop%snowfallac_land = clear_val
+        Sfcprop%snowfallac_ice  = clear_val
++       Sfcprop%acsnow_land     = clear_val
++       Sfcprop%acsnow_ice      = clear_val
+        !
+        if (Model%rdlai) then
+           allocate (Sfcprop%xlaixy (IM))
+@@ -3271,6 +3288,10 @@
+ 
+ !--- potential temperature definition in surface layer physics
+     logical              :: thsfc_loc      = .true.          !< flag for local vs. standard potential temperature
++!--- flux method in 2-m diagnostics
++    logical              :: diag_flux      = .false.         !< flag for flux method in 2-m diagnostics
++!--- flux method in 2-m diagnostics (for stable conditions) 
++    logical              :: diag_log       = .false.         !< flag for log method in 2-m diagnostics (for stable conditions)
+                                                              !<.true. means use local (gridpoint) surface pressure to define potential temperature
+                                                              !<       this is the current GFS physics approach
+                                                              !<.false. means use reference pressure of 1000 hPa to define potential temperature
+@@ -3346,6 +3367,7 @@
+     integer :: skeb_npass   = 11
+     integer :: lndp_type      = 0
+     integer :: n_var_lndp     = 0
++    logical :: lndp_each_step = .false.
+     integer :: n_var_spp    =  0
+     integer :: spp_pbl      =  0
+     integer :: spp_sfc      =  0
+@@ -3464,7 +3486,7 @@
+                                dlqf, rbcr, shoc_parm, psauras, prauras, wminras,            &
+                                do_sppt, do_shum, do_skeb,                                   &
+                                do_spp, n_var_spp,                                           &
+-                               lndp_type,  n_var_lndp,                                      &
++                               lndp_type,  n_var_lndp, lndp_each_step,                      &
+                                pert_mp,pert_clds,pert_radtend,                              &
+                           !--- Rayleigh friction
+                                prslrd0, ral_ts,  ldiag_ugwp, do_ugwp, do_tofd,              &
+@@ -3484,6 +3506,8 @@
+                                sfc_z0_type,                                                 &
+                           !--- switch beteeen local and standard potential temperature
+                                thsfc_loc,                                                   &
++                          !--- switches in 2-m diagnostics
++                               diag_flux, diag_log,                                         &
+                           !    vertical diffusion
+                                xkzm_m, xkzm_h, xkzm_s, xkzminv, moninq_fac, dspfac,         &
+                                bl_upfr, bl_dnfr, rlmx, elmx, sfc_rlm,                       &
+@@ -4262,6 +4286,17 @@
+ 
+ !--- potential temperature reference in sfc layer
+     Model%thsfc_loc        = thsfc_loc
++    if (Model%do_mynnsfclay) then
++!--- flux method in 2-m diagnostics
++      Model%diag_flux        = .true.
++!--- flux method in 2-m diagnostics (for stable conditions)
++      Model%diag_log         = .false.
++    else
++!--- flux method in 2-m diagnostics
++      Model%diag_flux        = diag_flux
++!--- flux method in 2-m diagnostics (for stable conditions)
++      Model%diag_log         = diag_log
++    endif
+ 
+ !--- vertical diffusion
+     Model%xkzm_m           = xkzm_m
+@@ -4294,6 +4329,7 @@
+     !--- stochastic surface perturbation options
+     Model%lndp_type        = lndp_type
+     Model%n_var_lndp       = n_var_lndp
++    Model%lndp_each_step   = lndp_each_step
+     Model%do_spp           = do_spp
+     Model%n_var_spp        = n_var_spp
+ 
+@@ -5858,6 +5894,8 @@
+       print *, ' rbcr              : ', Model%rbcr
+       print *, ' do_mynnedmf       : ', Model%do_mynnedmf
+       print *, ' do_mynnsfclay     : ', Model%do_mynnsfclay
++      print *, ' diag_flux         : ', Model%diag_flux
++      print *, ' diag_log          : ', Model%diag_log
+       print *, ' do_myjsfc         : ', Model%do_myjsfc
+       print *, ' do_myjpbl         : ', Model%do_myjpbl
+       print *, ' do_ugwp           : ', Model%do_ugwp
+@@ -5937,6 +5975,7 @@
+       print *, ' do_skeb           : ', Model%do_skeb
+       print *, ' lndp_type         : ', Model%lndp_type
+       print *, ' n_var_lndp        : ', Model%n_var_lndp
++      print *, ' lndp_each_step    : ', Model%lndp_each_step
+       print *, ' do_spp            : ', Model%do_spp
+       print *, ' n_var_spp         : ', Model%n_var_spp
+       print *, ' '
+@@ -6636,11 +6675,17 @@
+ !--- In/Out
+     allocate (Diag%srunoff (IM))
+     allocate (Diag%evbsa   (IM))
+-    allocate (Diag%evcwa   (IM))
+     allocate (Diag%snohfa  (IM))
++    allocate (Diag%evcwa   (IM))
+     allocate (Diag%transa  (IM))
+     allocate (Diag%sbsnoa  (IM))
+     allocate (Diag%snowca  (IM))
++    allocate (Diag%evbs    (IM))
++    allocate (Diag%evcw    (IM))
++    allocate (Diag%sbsno   (IM))
++    allocate (Diag%trans   (IM))
++    allocate (Diag%snowmt_land (IM))
++    allocate (Diag%snowmt_ice  (IM))
+     allocate (Diag%soilm   (IM))
+     allocate (Diag%tmpmin  (IM))
+     allocate (Diag%tmpmax  (IM))
+@@ -6941,8 +6986,14 @@
+     Diag%evcwa      = zero
+     Diag%snohfa     = zero
+     Diag%transa     = zero
+-    Diag%sbsnoa     = zero
+     Diag%snowca     = zero
++    Diag%sbsnoa     = zero
++    Diag%sbsno      = zero
++    Diag%evbs       = zero
++    Diag%evcw       = zero
++    Diag%trans      = zero
++    Diag%snowmt_land= zero
++    Diag%snowmt_ice = zero 
+     Diag%soilm      = zero
+     Diag%tmpmin     = Model%huge
+     Diag%tmpmax     = zero
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/data/GFS_typedefs.meta update-rrfs-dev-20220614/FV3/ccpp/data/GFS_typedefs.meta
+--- gsl-develop-20220614/FV3/ccpp/data/GFS_typedefs.meta	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/data/GFS_typedefs.meta	2022-06-14 21:07:26.000000000 +0000
+@@ -1637,21 +1637,35 @@
+   kind = kind_phys
+   active = (control_for_land_surface_scheme == identifier_for_ruc_land_surface_scheme)
+ [snowfallac_land]
+-  standard_name = surface_snow_amount_over_land
+-  long_name = run-total snow accumulation on the ground
++  standard_name = surface_snow_amount_vardens_over_land
++  long_name = run-total snow accumulation on the ground with variable snow density over land
+   units = kg m-2
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
+   active = (control_for_land_surface_scheme == identifier_for_ruc_land_surface_scheme)
++[acsnow_land]
++  standard_name = surface_snow_lwe_thickness_amount_over_land
++  long_name = run-total snowfall water equivalent over land
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
+ [snowfallac_ice]
+-  standard_name = surface_snow_amount_over_ice
+-  long_name = run-total snow accumulation on the ice
++  standard_name = surface_snow_amount_vardens_over_ice
++  long_name = run-total snow accumulation on the ground with variable snow density over ice
+   units = kg m-2
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
+   active = (control_for_land_surface_scheme == identifier_for_ruc_land_surface_scheme)
++[acsnow_ice]
++  standard_name = surface_snow_lwe_thickness_amount_over_ice
++  long_name = run-total snowfall water equivalent over ice
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
+ [ustm]
+   standard_name = surface_friction_velocity_for_momentum
+   long_name = friction velocity isolated for momentum only
+@@ -4395,6 +4409,18 @@
+   units = flag
+   dimensions = ()
+   type = logical
++[diag_flux]
++  standard_name = flag_for_flux_method_in_2m_diagnostics
++  long_name = flag for flux method in 2-m diagnostics
++  units = flag
++  dimensions = ()
++  type = logical
++[diag_log]
++  standard_name = flag_for_log_method_in_2m_diagnostics
++  long_name = flag for log method in 2-m diagnostics
++  units = flag
++  dimensions = ()
++  type = logical
+ [hybedmf]
+   standard_name = flag_for_hybrid_edmf_pbl_scheme
+   long_name = flag for hybrid edmf pbl scheme (moninedmf)
+@@ -7166,12 +7192,54 @@
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
++[sbsno]
++  standard_name = snow_deposition_sublimation_upward_latent_heat_flux
++  long_name = latent heat flux from snow depo/subl
++  units = W m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++[evbs]
++  standard_name = soil_upward_latent_heat_flux
++  long_name = soil upward latent heat flux
++  units = W m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++[evcw]
++  standard_name = canopy_upward_latent_heat_flux
++  long_name = canopy upward latent heat flux
++  units = W m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++[trans]
++  standard_name = transpiration_flux
++  long_name = total plant transpiration rate
++  units = W m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
+ [soilm]
+   standard_name = soil_moisture_content
+   long_name = soil moisture
+   units = kg m-2
+   dimensions = (horizontal_loop_extent)
+   type = real
++  kind = kind_phys
++[snowmt_land]
++  standard_name = surface_snow_melt_over_land
++  long_name = snow melt during timestep over land
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++[snowmt_ice]
++  standard_name = surface_snow_melt_over_ice
++  long_name = snow melt during timestep over ice
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
+   kind = kind_phys
+ [tmpmin]
+   standard_name = minimum_temperature_at_2m
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/driver/GFS_diagnostics.F90 update-rrfs-dev-20220614/FV3/ccpp/driver/GFS_diagnostics.F90
+--- gsl-develop-20220614/FV3/ccpp/driver/GFS_diagnostics.F90	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/driver/GFS_diagnostics.F90	2022-06-14 21:08:38.000000000 +0000
+@@ -1044,7 +1044,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'ssrun_acc'
+-    ExtDiag(idx)%desc = 'surface storm water runoff - GFS lsm'
++    ExtDiag(idx)%desc = 'Accumulated surface storm water runoff'
+     ExtDiag(idx)%unit = 'kg/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     allocate (ExtDiag(idx)%data(nblks))
+@@ -1055,7 +1055,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'evbs_ave'
+-    ExtDiag(idx)%desc = 'Direct Evaporation from Bare Soil - GFS lsm'
++    ExtDiag(idx)%desc = 'Direct Evaporation from Bare Soil'
+     ExtDiag(idx)%unit = 'W/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%time_avg = .TRUE.
+@@ -1067,7 +1067,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'evcw_ave'
+-    ExtDiag(idx)%desc = 'Canopy water evaporation - GFS lsm'
++    ExtDiag(idx)%desc = 'Canopy water evaporation'
+     ExtDiag(idx)%unit = 'W/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%time_avg = .TRUE.
+@@ -1079,7 +1079,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'snohf'
+-    ExtDiag(idx)%desc = 'Snow Phase Change Heat Flux - GFS lsm'
++    ExtDiag(idx)%desc = 'Snow Phase Change Heat Flux'
+     ExtDiag(idx)%unit = 'W/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%time_avg = .TRUE.
+@@ -1092,7 +1092,7 @@
+      idx = idx + 1
+      ExtDiag(idx)%axes = 2
+      ExtDiag(idx)%name = 'pah_ave'
+-     ExtDiag(idx)%desc = ' Total Precipitation Advected Heat - GFS lsm'
++     ExtDiag(idx)%desc = ' Total Precipitation Advected Heat'
+      ExtDiag(idx)%unit = 'W/m**2'
+      ExtDiag(idx)%mod_name = 'gfs_phys'
+      ExtDiag(idx)%time_avg = .TRUE.
+@@ -1105,7 +1105,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'trans_ave'
+-    ExtDiag(idx)%desc = 'transpiration - GFS lsm'
++    ExtDiag(idx)%desc = 'transpiration'
+     ExtDiag(idx)%unit = 'W/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%time_avg = .TRUE.
+@@ -1117,7 +1117,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'sbsno_ave'
+-    ExtDiag(idx)%desc = 'Sublimation (evaporation from snow) - GFS lsm'
++    ExtDiag(idx)%desc = 'Sublimation (evaporation from snow)'
+     ExtDiag(idx)%unit = 'W/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%time_avg = .TRUE.
+@@ -1128,15 +1128,17 @@
+ 
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+-    ExtDiag(idx)%name = 'snowc_ave'
+-    ExtDiag(idx)%desc = 'snow cover - GFS lsm'
++    ExtDiag(idx)%name = 'snowc'
++    !ExtDiag(idx)%name = 'snowc_ave'
++    ExtDiag(idx)%desc = 'snow cover '
+     ExtDiag(idx)%unit = '%'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+-    ExtDiag(idx)%time_avg = .TRUE.
++    !ExtDiag(idx)%time_avg = .TRUE.
+     ExtDiag(idx)%cnvfac = cn_100
+     allocate (ExtDiag(idx)%data(nblks))
+     do nb = 1,nblks
+-      ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%snowca(:)
++      ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%sncovr(:)
++      !ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%snowca(:)
+     enddo
+ 
+     idx = idx + 1
+@@ -1279,7 +1281,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'dlwsfc'
+-    ExtDiag(idx)%desc = 'time accumulated downward lw flux at surface- GFS physics'
++    ExtDiag(idx)%desc = 'time accumulated downward lw flux at surface'
+     ExtDiag(idx)%unit = 'w/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%intpl_method = 'bilinear'
+@@ -1291,7 +1293,7 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'ulwsfc'
+-    ExtDiag(idx)%desc = 'time accumulated upward lw flux at surface- GFS physics'
++    ExtDiag(idx)%desc = 'time accumulated upward lw flux at surface'
+     ExtDiag(idx)%unit = 'w/m**2'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%intpl_method = 'bilinear'
+@@ -2107,7 +2109,7 @@
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'cpofp'
+     ExtDiag(idx)%desc = 'Percent frozen precipitation'
+-    ExtDiag(idx)%unit = '%'
++    ExtDiag(idx)%unit = 'fraction'
+     ExtDiag(idx)%mod_name = 'gfs_phys'
+     ExtDiag(idx)%intpl_method = 'bilinear'
+     allocate (ExtDiag(idx)%data(nblks))
+@@ -2793,7 +2795,7 @@
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'canopy'
+     ExtDiag(idx)%desc = 'canopy water (cnwat in gfs data)'
+-    ExtDiag(idx)%unit = 'XXX'
++    ExtDiag(idx)%unit = 'mm'
+     ExtDiag(idx)%mod_name = 'gfs_sfc'
+     allocate (ExtDiag(idx)%data(nblks))
+     do nb = 1,nblks
+@@ -2892,7 +2894,7 @@
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'hice'
+     ExtDiag(idx)%desc = 'sea ice thickness (icetk in gfs_data)'
+-    ExtDiag(idx)%unit = 'XXX'
++    ExtDiag(idx)%unit = 'm'
+     ExtDiag(idx)%mod_name = 'gfs_sfc'
+     allocate (ExtDiag(idx)%data(nblks))
+     do nb = 1,nblks
+@@ -2944,9 +2946,64 @@
+       ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%snowd(:)
+     enddo
+ 
++    idx = idx + 1
++    ExtDiag(idx)%axes = 2
++    ExtDiag(idx)%name = 'sbsno'
++    ExtDiag(idx)%desc = 'instantaneous sublimation (evaporation from snow)'
++    ExtDiag(idx)%unit = 'W/m**2'
++    ExtDiag(idx)%mod_name = 'gfs_phys'
++    allocate (ExtDiag(idx)%data(nblks))
++    do nb = 1,nblks
++      ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%sbsno(:)
++    enddo
++
++    idx = idx + 1
++    ExtDiag(idx)%axes = 2
++    ExtDiag(idx)%name = 'evbs'
++    ExtDiag(idx)%desc = 'instantaneous direct evaporation over land'
++    ExtDiag(idx)%unit = 'W m-2'
++    ExtDiag(idx)%mod_name = 'gfs_phys'
++    allocate (ExtDiag(idx)%data(nblks))
++    do nb = 1,nblks
++      ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%evbs(:)
++    enddo
++
++    idx = idx + 1
++    ExtDiag(idx)%axes = 2
++    ExtDiag(idx)%name = 'evcw'
++    ExtDiag(idx)%desc = 'instantaneous canopy evaporation'
++    ExtDiag(idx)%unit = 'W m-2'
++    ExtDiag(idx)%mod_name = 'gfs_phys'
++    allocate (ExtDiag(idx)%data(nblks))
++    do nb = 1,nblks
++      ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%evcw(:)
++    enddo
++
++    idx = idx + 1
++    ExtDiag(idx)%axes = 2
++    ExtDiag(idx)%name = 'trans'
++    ExtDiag(idx)%desc = 'instantaneous transpiration'
++    ExtDiag(idx)%unit = 'W m-2'
++    ExtDiag(idx)%mod_name = 'gfs_phys'
++    allocate (ExtDiag(idx)%data(nblks))
++    do nb = 1,nblks
++      ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%trans(:)
++    enddo
++
+     if (Model%lsm == Model%lsm_ruc) then
+       idx = idx + 1
+       ExtDiag(idx)%axes = 2
++      ExtDiag(idx)%name = 'rhofr'
++      ExtDiag(idx)%desc = 'density of frozen precipitation'
++      ExtDiag(idx)%unit = 'kg m-3'
++      ExtDiag(idx)%mod_name = 'gfs_sfc'
++      allocate (ExtDiag(idx)%data(nblks))
++      do nb = 1,nblks
++        ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%rhofr(:)
++      enddo
++
++      idx = idx + 1
++      ExtDiag(idx)%axes = 2
+       ExtDiag(idx)%name = 'snowfall_acc_land'
+       ExtDiag(idx)%desc = 'total accumulated frozen precipitation over land'
+       ExtDiag(idx)%unit = 'kg m-2'
+@@ -2958,6 +3015,28 @@
+ 
+       idx = idx + 1
+       ExtDiag(idx)%axes = 2
++      ExtDiag(idx)%name = 'acsnow_land'
++      ExtDiag(idx)%desc = 'total accumulated SWE of frozen precipitation over land'
++      ExtDiag(idx)%unit = 'kg m-2'
++      ExtDiag(idx)%mod_name = 'gfs_sfc'
++      allocate (ExtDiag(idx)%data(nblks))
++      do nb = 1,nblks
++        ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%acsnow_land(:)
++      enddo
++
++      idx = idx + 1
++      ExtDiag(idx)%axes = 2
++      ExtDiag(idx)%name = 'snowmt_land'
++      ExtDiag(idx)%desc = 'accumulated snow melt over land'
++      ExtDiag(idx)%unit = 'kg m-2'
++      ExtDiag(idx)%mod_name = 'gfs_phys'
++      allocate (ExtDiag(idx)%data(nblks))
++      do nb = 1,nblks
++        ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%snowmt_land(:)
++      enddo
++
++      idx = idx + 1
++      ExtDiag(idx)%axes = 2
+       ExtDiag(idx)%name = 'snowfall_acc_ice'
+       ExtDiag(idx)%desc = 'total accumulated frozen precipitation over ice'
+       ExtDiag(idx)%unit = 'kg m-2'
+@@ -2966,7 +3045,29 @@
+       do nb = 1,nblks
+         ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%snowfallac_ice(:)
+       enddo
+-    endif
++
++      idx = idx + 1
++      ExtDiag(idx)%axes = 2
++      ExtDiag(idx)%name = 'acsnow_ice'
++      ExtDiag(idx)%desc = 'total accumulated SWE of frozen precipitation over ice'
++      ExtDiag(idx)%unit = 'kg m-2'
++      ExtDiag(idx)%mod_name = 'gfs_sfc'
++      allocate (ExtDiag(idx)%data(nblks))
++      do nb = 1,nblks
++        ExtDiag(idx)%data(nb)%var2 => Sfcprop(nb)%acsnow_ice(:)
++      enddo
++
++      idx = idx + 1
++      ExtDiag(idx)%axes = 2
++      ExtDiag(idx)%name = 'snowmt_ice'
++      ExtDiag(idx)%desc = 'accumulated snow melt over ice'
++      ExtDiag(idx)%unit = 'kg m-2'
++      ExtDiag(idx)%mod_name = 'gfs_phys'
++      allocate (ExtDiag(idx)%data(nblks))
++      do nb = 1,nblks
++        ExtDiag(idx)%data(nb)%var2 => IntDiag(nb)%snowmt_ice(:)
++      enddo
++    endif ! RUC lsm
+ 
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+@@ -3078,8 +3179,8 @@
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+     ExtDiag(idx)%name = 'tprcp'
+-    ExtDiag(idx)%desc = 'total precipitation'
+-    ExtDiag(idx)%unit = 'kg/m**2'
++    ExtDiag(idx)%desc = 'total time-step precipitation'
++    ExtDiag(idx)%unit = 'm'
+     ExtDiag(idx)%mod_name = 'gfs_sfc'
+     allocate (ExtDiag(idx)%data(nblks))
+     do nb = 1,nblks
+@@ -3155,6 +3256,18 @@
+       ExtDiag(idx)%data(nb)%var2 => sfcprop(nb)%vfrac(:)
+     enddo
+ 
++    idx = idx + 1
++    ExtDiag(idx)%axes = 2
++    ExtDiag(idx)%name = 'wetness'
++    ExtDiag(idx)%desc = 'soil moisture availability in top soil layer'
++    ExtDiag(idx)%unit = 'fraction'
++    ExtDiag(idx)%mod_name = 'gfs_sfc'
++    ExtDiag(idx)%cnvfac = cn_100
++    allocate (ExtDiag(idx)%data(nblks))
++    do nb = 1,nblks
++      ExtDiag(idx)%data(nb)%var2 => sfcprop(nb)%wetness(:)
++    enddo
++
+   if (Model%rdlai) then
+     idx = idx + 1
+     ExtDiag(idx)%axes = 2
+Only in update-rrfs-dev-20220614/FV3/ccpp: include
+Only in update-rrfs-dev-20220614/FV3/ccpp/physics: 79-head.diff
+Only in update-rrfs-dev-20220614/FV3/ccpp/physics: notes
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/cu_gf_driver.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/cu_gf_driver.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/cu_gf_driver.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/cu_gf_driver.F90	2022-06-14 18:37:20.000000000 +0000
+@@ -311,6 +311,7 @@
+ ! these should be coming in from outside
+ !
+ !    cactiv(:)      = 0
++!    cactiv_m(:)    = 0
+      rand_mom(:)    = 0.
+      rand_vmas(:)   = 0.
+      rand_clos(:,:) = 0.
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/GFS_debug.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/GFS_debug.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/GFS_debug.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/GFS_debug.F90	2022-06-14 18:37:20.000000000 +0000
+@@ -627,6 +627,9 @@
+                      !    call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%fluxr_n ',    Diag%fluxr(:,n))
+                      !end do
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%srunoff     ',    Diag%srunoff)
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%evbs        ',    Diag%evbs)
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%evcw        ',    Diag%evcw)
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%sbsno       ',    Diag%sbsno)
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%evbsa       ',    Diag%evbsa)
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%evcwa       ',    Diag%evcwa)
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%snohfa      ',    Diag%snohfa)
+@@ -1203,8 +1206,6 @@
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%evap_ice            ', Interstitial%evap_ice                )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%evap_land           ', Interstitial%evap_land               )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%evap_water          ', Interstitial%evap_water              )
+-                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%evbs                ', Interstitial%evbs                    )
+-                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%evcw                ', Interstitial%evcw                    )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%ext_diag_thompson_reset', Interstitial%ext_diag_thompson_reset)
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%faerlw              ', Interstitial%faerlw                  )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%faersw              ', Interstitial%faersw                  )
+@@ -1301,7 +1302,6 @@
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%save_tcp            ', Interstitial%save_tcp                )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%save_u              ', Interstitial%save_u                  )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%save_v              ', Interstitial%save_v                  )
+-                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%sbsno               ', Interstitial%sbsno                   )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%scmpsw%uvbfc        ', Interstitial%scmpsw%uvbfc            )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%scmpsw%uvbf0        ', Interstitial%scmpsw%uvbf0            )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%scmpsw%nirbm        ', Interstitial%scmpsw%nirbm            )
+@@ -1314,6 +1314,9 @@
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%sigmafrac           ', Interstitial%sigmafrac               )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%sigmatot            ', Interstitial%sigmatot                )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snowc               ', Interstitial%snowc                   )
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snowd_ice           ', Interstitial%snowd_ice               )
++!                    call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snowd_land          ', Interstitial%snowd_land              )
++!                    call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snowd_water         ', Interstitial%snowd_water             )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snohf               ', Interstitial%snohf                   )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%snowmt              ', Interstitial%snowmt                  )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%stress              ', Interstitial%stress                  )
+@@ -1326,7 +1329,7 @@
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tprcp_ice           ', Interstitial%tprcp_ice               )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tprcp_land          ', Interstitial%tprcp_land              )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tprcp_water         ', Interstitial%tprcp_water             )
+-                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%trans               ', Interstitial%trans                   )
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Diag%trans               ', Interstitial%trans                   )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tseal               ', Interstitial%tseal                   )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tsfa                ', Interstitial%tsfa                    )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%tsfc_water          ', Interstitial%tsfc_water              )
+@@ -1340,6 +1343,9 @@
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%vdftra              ', Interstitial%vdftra                  )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%vegf1d              ', Interstitial%vegf1d                  )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%wcbmax              ', Interstitial%wcbmax                  )
++                     call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%weasd_ice           ', Interstitial%weasd_ice               )
++!                    call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%weasd_land          ', Interstitial%weasd_land              )
++!                    call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%weasd_water         ', Interstitial%weasd_water             )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%wind                ', Interstitial%wind                    )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%work1               ', Interstitial%work1                   )
+                      call print_var(mpirank, omprank, blkno, Grid%xlat_d, Grid%xlon_d, 'Interstitial%work2               ', Interstitial%work2                   )
+Only in update-rrfs-dev-20220614/FV3/ccpp/physics/physics: GFS_rrtmgp_gfdlmp_pre.F90
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/lsm_ruc.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/lsm_ruc.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/lsm_ruc.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/lsm_ruc.F90	2022-06-15 02:59:36.000000000 +0000
+@@ -300,15 +300,15 @@
+ !     sncovr1  - real, snow cover over land (fractional)           im   !
+ !     qsurf    - real, specific humidity at sfc                    im   !
+ !     gflux    - real, soil heat flux (w/m**2)                     im   !
+-!     drain    - real, subsurface runoff (m/s)                     im   !
++!     drain    - real, subsurface runoff (mm/s)                    im   !
+ !     evap     - real, latent heat flux in kg kg-1 m s-1           im   !
+-!     runof    - real, surface runoff (m/s)                        im   !
+-!     evbs     - real, direct soil evaporation (m/s)               im   !
+-!     evcw     - real, canopy water evaporation (m/s)              im   !
+-!     sbsno    - real, sublimation/deposit from snopack (m/s)      im   !
++!     runof    - real, surface runoff (mm/s)                       im   !
++!     evbs     - real, direct soil evaporation (W m-2)             im   !
++!     evcw     - real, canopy water evaporation (W m-2)            im   !
++!     sbsno    - real, sublimation/deposit from snopack (W m-2)    im   !
+ !     stm      - real, total soil column moisture content (m)      im   !
+-!     trans    - real, total plant transpiration (m/s)             im   !
+-!     zorl     - real, surface roughness                           im   !
++!     trans    - real, total plant transpiration (W m-2)           im   !
++!     zorl     - real, surface roughness (cm)                      im   !
+ !     wetness  - real, normalized soil wetness                     im   !
+ !                                                                       !
+ !  ====================    end of description    =====================  !
+@@ -324,17 +324,17 @@
+      &     ( iter, me, master, delt, kdt, im, nlev, lsm_ruc, lsm,       &
+      &       imp_physics, imp_physics_gfdl, imp_physics_thompson,       &
+      &       imp_physics_nssl,                                          &
+-     &       do_mynnsfclay, lsoil_ruc, lsoil, rdlai, xlat_d, xlon_d, zs,&
+-     &       t1, q1, qc, stype, vtype, sigmaf, laixy,                   &
++     &       do_mynnsfclay, lsoil_ruc, lsoil, rdlai, xlat_d, xlon_d,    &
++     &       oro, sigma, zs, t1, q1, qc, stype, vtype, sigmaf, laixy,   &
+      &       dlwflx, dswsfc, tg3, coszen, land, icy, use_lake,          &
+-     &       rainnc, rainc, ice, snow, graupel,                         &
+-     &       prsl1, zf, wind, shdmin, shdmax,                           &
++     &       rainnc, rainc, ice, snow, graupel, prsl1, zf,              &
++     &       wind, shdmin, shdmax,                                      &
+      &       srflag, sfalb_lnd_bck, snoalb,                             &
+      &       isot, ivegsrc, fice, smcwlt2, smcref2,                     &
+      &       min_lakeice, min_seaice, oceanfrac,                        &
+      ! --- constants
+      &       con_cp, con_rd, con_rv, con_g, con_pi, con_hvap,           &
+-     &       con_fvirt,                                                 &
++     &       con_hfus, con_fvirt,                                       &
+      ! --- in/outs for ice and land
+      &       semisbase, semis_lnd, semis_ice, sfalb_lnd, sfalb_ice,     &
+      &       sncovr1_lnd, weasd_lnd, snwdph_lnd, tskin_lnd,             &
+@@ -346,13 +346,13 @@
+      &       qsurf_lnd, gflux_lnd, evap_lnd, hflx_lnd,                  &
+      &       runof, runoff, srunoff, drain,                             &
+      &       cm_lnd, ch_lnd, evbs, evcw, stm, wetness,                  &
+-     &       snowfallac_lnd,                                            &
++     &       snowfallac_lnd, acsnow_lnd, snowmt_lnd, snohf,             &
+      &       albdvis_lnd, albdnir_lnd,  albivis_lnd,  albinir_lnd,      & 
+      ! for ice
+      &       sfcqc_ice, sfcqv_ice,                                      &
+      &       tsurf_ice, tsnow_ice, z0rl_ice,                            &
+      &       qsurf_ice, gflux_ice, evap_ice, ep1d_ice, hflx_ice,        &
+-     &       cm_ice, ch_ice, snowfallac_ice,                            &
++     &       cm_ice, ch_ice, snowfallac_ice, acsnow_ice, snowmt_ice,    &
+      &       albdvis_ice, albdnir_ice,  albivis_ice,  albinir_ice,      &
+      ! --- out
+      &       rhosnf, sbsno,                                             &
+@@ -375,6 +375,7 @@
+       integer, intent(in) :: imp_physics, imp_physics_gfdl, imp_physics_thompson, &
+                              imp_physics_nssl
+       real (kind=kind_phys), dimension(:), intent(in) :: xlat_d, xlon_d
++      real (kind=kind_phys), dimension(:), intent(in) :: oro, sigma
+ 
+       real (kind=kind_phys), dimension(:), intent(in) ::          &
+      &       t1, sigmaf, laixy, dlwflx, dswsfc, tg3,              &
+@@ -390,7 +391,7 @@
+       real (kind=kind_phys),  intent(in) :: delt, min_seaice, min_lakeice
+       real (kind=kind_phys),  intent(in) :: con_cp, con_rv, con_g,       &
+                                             con_pi, con_rd,              &
+-                                            con_hvap, con_fvirt
++                                            con_hvap, con_hfus, con_fvirt
+ 
+       logical, dimension(:),  intent(in) :: flag_iter, flag_guess
+       logical, dimension(:),  intent(in) :: land, icy, use_lake
+@@ -432,10 +433,11 @@
+      ! for land
+      &       sncovr1_lnd, qsurf_lnd, gflux_lnd, evap_lnd,                &
+      &       cmm_lnd, chh_lnd, hflx_lnd, sbsno,                          &
+-     &       snowfallac_lnd,                                             &
++     &       snowfallac_lnd, acsnow_lnd, snowmt_lnd, snohf,              &
+      ! for ice
+      &       sncovr1_ice, qsurf_ice, gflux_ice, evap_ice, ep1d_ice,      &
+-     &       cmm_ice, chh_ice, hflx_ice, snowfallac_ice
++     &       cmm_ice, chh_ice, hflx_ice,                                 &
++     &       snowfallac_ice, acsnow_ice, snowmt_ice
+ 
+       real (kind=kind_phys), dimension(:), intent(  out) ::              &
+      &       albdvis_lnd, albdnir_lnd,  albivis_lnd,  albinir_lnd,       &
+@@ -455,14 +457,14 @@
+      &       tprcp_old, srflag_old, sr_old, canopy_old, wetness_old,    &
+      ! for land
+      &       weasd_lnd_old, snwdph_lnd_old, tskin_lnd_old,              &
+-     &       tsnow_lnd_old, snowfallac_lnd_old,                         &
++     &       tsnow_lnd_old, snowfallac_lnd_old, acsnow_lnd_old,         &
+      &       sfcqv_lnd_old, sfcqc_lnd_old, z0rl_lnd_old,                &
+-     &       sncovr1_lnd_old,                                           &
++     &       sncovr1_lnd_old,snowmt_lnd_old,                            &
+      ! for ice
+      &       weasd_ice_old, snwdph_ice_old, tskin_ice_old,              &
+-     &       tsnow_ice_old, snowfallac_ice_old,                         &
++     &       tsnow_ice_old, snowfallac_ice_old, acsnow_ice_old,         &
+      &       sfcqv_ice_old, sfcqc_ice_old, z0rl_ice_old,                &
+-     &       sncovr1_ice_old
++     &       sncovr1_ice_old,snowmt_ice_old
+ 
+       !-- local spp pattern array
+       real (kind=kind_phys), dimension(im,lsoil_ruc,1) :: pattern_spp_lsm
+@@ -480,6 +482,7 @@
+ 
+       real (kind=kind_phys),dimension (im,1,1)      ::                  &
+      &     conflx2, sfcprs, sfctmp, q2, qcatm, rho2
++      real (kind=kind_phys),dimension (im,1)        ::   orog, stdev
+       real (kind=kind_phys),dimension (im,1)        ::                  &
+      &     albbck_lnd, alb_lnd, chs_lnd, flhc_lnd, flqc_lnd,            &
+      &     wet, wet_ice, smmax, cmc, drip,  ec, edir, ett,              &
+@@ -493,7 +496,7 @@
+      &     snomlt_lnd, sncovr_lnd, soilw, soilm, ssoil_lnd,             &
+      &     soilt_lnd, tbot,                                             &
+      &     xlai, swdn, z0_lnd, znt_lnd, rhosnfr, infiltr,               &
+-     &     precipfr, snfallac_lnd, acsn,                                &
++     &     precipfr, snfallac_lnd, acsn_lnd,                            &
+      &     qsfc_lnd, qsg_lnd, qvg_lnd, qcg_lnd, soilt1_lnd, chklowq
+      ! ice
+       real (kind=kind_phys),dimension (im,1)        ::                  &
+@@ -502,7 +505,7 @@
+      &     solnet_ice, sfcems_ice, hfx_ice,                             &
+      &     sneqv_ice, snoalb1d_ice, snowh_ice, snoh_ice, tsnav_ice,     &
+      &     snomlt_ice, sncovr_ice, ssoil_ice, soilt_ice,                &
+-     &     z0_ice, znt_ice, snfallac_ice,                               &
++     &     z0_ice, znt_ice, snfallac_ice, acsn_ice,                     &
+      &     qsfc_ice, qsg_ice, qvg_ice, qcg_ice, soilt1_ice
+ 
+ 
+@@ -541,8 +544,8 @@
+       ipr = 10
+  
+       !--
+-      testptlat = 74.12 !29.5 
+-      testptlon = 164.0 !283.0 
++      testptlat = 68.6 !41.02 !42.05 !39.0 !74.12 !29.5 
++      testptlon = 298.6 !284.50 !286.75 !280.6 !164.0 !283.0 
+       !--
+ 
+       debug_print=.false.
+@@ -632,7 +635,7 @@
+       if(ivegsrc == 1) then
+         llanduse = 'MODI-RUC'  ! IGBP
+         iswater = 17
+-        isice = 15
++        isice = glacier
+       else
+         write(errmsg, '(a,i0)') 'Logic error in sfc_drv_ruc_run: iswater/isice not configured for ivegsrc=', ivegsrc
+         errflg = 1
+@@ -669,27 +672,30 @@
+           wetness_old(i)         = wetness(i)
+           canopy_old(i)          = canopy(i)
+           !srflag_old(i)          = srflag(i)
+-          !acsnow_old(i)          = acsnow(i)
+           ! for land
+           weasd_lnd_old(i)       = weasd_lnd(i)
+           snwdph_lnd_old(i)      = snwdph_lnd(i)
+           tskin_lnd_old(i)       = tskin_lnd(i)
+           tsnow_lnd_old(i)       = tsnow_lnd(i)
+-          snowfallac_lnd_old(i)  = snowfallac_lnd(i)
+           sfcqv_lnd_old(i)       = sfcqv_lnd(i)
+           sfcqc_lnd_old(i)       = sfcqc_lnd(i)
+           z0rl_lnd_old(i)        = z0rl_lnd(i)
+           sncovr1_lnd_old(i)     = sncovr1_lnd(i)
++          snowmt_lnd_old(i)      = snowmt_lnd(i)
++          acsnow_lnd_old(i)      = acsnow_lnd(i)
++          snowfallac_lnd_old(i)  = snowfallac_lnd(i)
+           ! for ice
+           weasd_ice_old(i)       = weasd_ice(i)
+           snwdph_ice_old(i)      = snwdph_ice(i)
+           tskin_ice_old(i)       = tskin_ice(i)
+           tsnow_ice_old(i)       = tsnow_ice(i)
+-          snowfallac_ice_old(i)  = snowfallac_ice(i)
+           sfcqv_ice_old(i)       = sfcqv_ice(i)
+           sfcqc_ice_old(i)       = sfcqc_ice(i)
+           z0rl_ice_old(i)        = z0rl_ice(i)
+           sncovr1_ice_old(i)     = sncovr1_ice(i)
++          snowmt_ice_old(i)      = snowmt_ice(i)
++          acsnow_ice_old(i)      = acsnow_ice(i)
++          snowfallac_ice_old(i)  = snowfallac_ice(i)
+ 
+           do k = 1, lsoil_ruc
+             smois_old(i,k)  = smois(i,k)
+@@ -723,6 +729,8 @@
+           sbsno(i)  = 0.0
+ 
+           !local i,j arrays
++          snoh_lnd(i,j) = 0.0
++          snoh_ice(i,j) = 0.0
+           dew_lnd(i,j)      = 0.0
+           dew_ice(i,j)      = 0.0
+           soilm(i,j)        = 0.0
+@@ -733,7 +741,8 @@
+           qfx_ice(i,j)      = 0.0
+           lh_lnd(i,j)       = 0.0
+           lh_ice(i,j)       = 0.0
+-          acsn(i,j)         = 0.0
++          esnow_lnd(i,j)    = 0.0
++          esnow_ice(i,j)    = 0.0
+           sfcexc(i,j)       = 0.0
+           acceta(i,j)       = 0.0
+           ssoil_lnd(i,j)    = 0.0
+@@ -745,10 +754,11 @@
+           runoff2(i,j)      = 0.0
+           acrunoff(i,j)     = 0.0
+           snfallac_lnd(i,j) = 0.0
++          acsn_lnd(i,j)     = 0.0
+           snfallac_ice(i,j) = 0.0
+-          rhosnfr(i,j)      = 0.0
++          acsn_ice(i,j)     = 0.0
+           precipfr(i,j)     = 0.0
+-
++          rhosnfr(i,j)      = -1.e3
+         endif
+       enddo ! i=1,im
+       enddo
+@@ -787,6 +797,13 @@
+ 
+       do j  = 1, 1    ! 1:1
+       do i  = 1, im   ! i - horizontal loop
++        orog(i,j) = oro(i)    !topography
++        stdev(i,j) = sigma(i) ! st. deviation (m)
++      enddo
++      enddo
++
++      do j  = 1, 1    ! 1:1
++      do i  = 1, im   ! i - horizontal loop
+         xice(i,j)  = 0.
+         if (flag_iter(i) .and. flag(i)) then
+ 
+@@ -808,9 +825,9 @@
+ !>  -   2. forcing data (f):
+ !!\n  \a sfcprs  - pressure at height zf above ground (pascals)
+ !!\n  \a sfctmp  - air temperature (\f$K\f$) at height zf above ground
+-!!\n  \a q2      - pressure at height zf above ground (pascals)
+-!!\n  \a qcatm   - cloud water mising ration at height zf above ground (\f$kg !kg^{-1}\f$)
+-!!\n  \a rho2    - air density at height zf above ground (pascals)
++!!\n  \a q2      - water vapor mix. ratio  at height zf above ground (\f$kg kg^{-1}\f$)
++!!\n  \a qcatm   - cloud water mixing ratio at height zf above ground (\f$kg kg^{-1}\f$)
++!!\n  \a rho2    - air density at height zf above ground ((\f$kg m^{-3}\f$))
+ 
+         sfcprs(i,1,j)  = prsl1(i)
+         sfctmp(i,1,j)  = t1(i)
+@@ -825,7 +842,7 @@
+ !!\n  \a rainncv - time-step non-convective precip (\f$kg m^{-2} \f$)
+ !!\n  \a graupelncv - time-step graupel (\f$kg m^{-2} \f$)
+ !!\n  \a snowncv - time-step snow (\f$kg m^{-2} \f$)
+-!!\n  \a precipfr - time-step precipitation in solod form (\f$kg m^{-2} \f$)
++!!\n  \a precipfr - time-step precipitation in solid form (\f$kg m^{-2} \f$)
+ !!\n  \a shdfac  - areal fractional coverage of green vegetation (0.0-1.0)
+ !!\n  \a shdmin  - minimum areal fractional coverage of green vegetation -> !shdmin1d
+ !!\n  \a shdmax  - maximum areal fractional coverage of green vegetation -> !shdmax1d
+@@ -840,16 +857,16 @@
+         !rainncv(i,j)    = rhoh2o * max(rain(i)-rainc(i),0.0)  ! total time-step explicit precip 
+         !graupelncv(i,j) = rhoh2o * graupel(i)
+         !snowncv(i,j)    = rhoh2o * snow(i)
+-        prcp(i,j)       = rhoh2o * (rainc(i)+rainnc(i))        ! tprcp in [m] - convective plus explicit
+-        raincv(i,j)     = rhoh2o * rainc(i)                    ! total time-step convective precip
+-        rainncv(i,j)    = rhoh2o * rainnc(i)                   ! total time-step explicit precip 
++        prcp(i,j)       = rhoh2o * (rainc(i)+rainnc(i))        ! total time-step convective plus explicit [mm]
++        raincv(i,j)     = rhoh2o * rainc(i)                    ! total time-step convective precip [mm]
++        rainncv(i,j)    = rhoh2o * rainnc(i)                   ! total time-step explicit precip [mm]
+         graupelncv(i,j) = rhoh2o * graupel(i)
+         snowncv(i,j)    = rhoh2o * snow(i)
+         if (debug_print) then
+         !-- diagnostics for a test point with known lat/lon
+-        if (abs(xlat_d(i)-testptlat).lt.2.5 .and.   &
+-            abs(xlon_d(i)-testptlon).lt.6.5)then
+-          if(weasd_lnd(i) > 0.) &
++        if (abs(xlat_d(i)-testptlat).lt.0.2 .and.   &
++            abs(xlon_d(i)-testptlon).lt.0.2)then
++          !if(weasd_lnd(i) > 0.) &
+             print 100,'(ruc_lsm_drv)  i=',i,          &
+             '  lat,lon=',xlat_d(i),xlon_d(i),         &
+             'rainc',rainc(i),'rainnc',rainnc(i),      &
+@@ -858,11 +875,12 @@
+             'sncovr1_lnd',sncovr1_lnd(i),'sfalb_lnd_bck',sfalb_lnd_bck(i),&
+             'prsl1',prsl1(i),'t1',t1(i),              &
+             !'snow',snow(i), 'snowncv',snowncv(i,j),   &
+-            'srflag',srflag(i),'weasd_lnd',weasd_lnd(i), &
++            'srflag',srflag(i),'weasd mm ',weasd_lnd(i), &
++            'tsnow_lnd',tsnow_lnd(i),'snwdph mm',snwdph_lnd(i), &
+             'tsurf_lnd',tsurf_lnd(i),'tslb(i,1)',tslb(i,1)
+         endif
+         endif
+- 100      format (";;; ",a,i4,a,2f9.2/(4(a10,'='es9.2)))
++ 100      format (";;; ",a,i4,a,2f14.7/(4(a10,'='es9.2)))
+         !--
+ 
+         ! ice precipitation is not used
+@@ -870,8 +888,6 @@
+ 
+         ! ice not used
+         ! precipfr(i,j)   = rainncv(i,j) * ffrozp(i,j)
+-        !acsn(i,j)         = acsnow(i)
+-        acsn(i,j) = 0.0
+ 
+         tbot(i,j) = tg3(i)
+ 
+@@ -966,7 +982,7 @@
+         endif ! coszen > 0.
+ 
+         snoalb1d_lnd(i,j) = snoalb(i)
+-        albbck_lnd(i,j)   = albbcksol(i) !sfalb_lnd_bck(i)
++        albbck_lnd(i,j)   = min(0.9,albbcksol(i)) !sfalb_lnd_bck(i)
+ 
+ 
+         !-- spp_lsm
+@@ -992,14 +1008,14 @@
+         solnet_lnd(i,j) = dswsfc(i)*(1.-alb_lnd(i,j)) !..net sw rad flx (dn-up) at sfc in w/m2
+ 
+         cmc(i,j) = canopy(i)            !  [mm] 
+-        soilt_lnd(i,j) = tsurf_lnd(i)            ! clu_q2m_iter
++        soilt_lnd(i,j) = tsurf_lnd(i)   
+         ! sanity check for snow temperature tsnow
+-        if (tsnow_lnd(i) > 0. .and. tsnow_lnd(i) < 273.15) then
++        if (tsnow_lnd(i) > 200. .and. tsnow_lnd(i) < 273.15) then
+           soilt1_lnd(i,j) = tsnow_lnd(i)
+         else
+           soilt1_lnd(i,j) = tsurf_lnd(i)
+         endif
+-        tsnav_lnd(i,j) = 0.5*(soilt_lnd(i,j) + soilt1_lnd(i,j)) - 273.15
++        tsnav_lnd(i,j) = min(0.,0.5*(soilt_lnd(i,j) + soilt1_lnd(i,j)) - 273.15)
+         do k = 1, lsoil_ruc
+           smsoil  (i,k,j) = smois(i,k)
+           slsoil  (i,k,j) = sh2o(i,k)
+@@ -1015,27 +1031,83 @@
+         endif
+ 
+         chs_lnd (i,j)   = ch_lnd(i) * wind(i) ! compute conductance
+-        flhc_lnd(i,j)   = chs_lnd(i,j) * rho(i) * con_cp ! * (1. + 0.84*q2(i,1,j))
++        flhc_lnd(i,j)   = chs_lnd(i,j) * rho(i) * con_cp * (1.+0.84*q2(i,1,j))
+         flqc_lnd(i,j)   = chs_lnd(i,j) * rho(i) * wet(i,j)
++
+         ! for output
+         cmm_lnd(i) = cm_lnd(i) * wind(i)
+         chh_lnd(i) = chs_lnd(i,j) * rho(i)
+         !
++        sneqv_lnd(i,j) = weasd_lnd(i)
+         snowh_lnd(i,j) = snwdph_lnd(i) * 0.001         ! convert from mm to m
+-        sneqv_lnd(i,j) = weasd_lnd(i)                  ! [mm]
++
++        if(kdt == 1) then
++          snfallac_lnd(i,j) = 0.
++          acsn_lnd(i,j)     = 0.
++          snomlt_lnd(i,j)   = 0.
++        else
++        !-- run-total accumulation
+         snfallac_lnd(i,j) = snowfallac_lnd(i)
+-        !> -- sanity checks on sneqv and snowh
+-        if (sneqv_lnd(i,j) /= 0.0 .and. snowh_lnd(i,j) == 0.0) then
+-          snowh_lnd(i,j) = 0.003 * sneqv_lnd(i,j) ! snow density ~300 kg m-3
++          acsn_lnd(i,j)     = acsnow_lnd(i)
++          snomlt_lnd(i,j)   = snowmt_lnd(i)
+         endif
+ 
+-        if (snowh_lnd(i,j) /= 0.0 .and. sneqv_lnd(i,j) == 0.0) then
+-          sneqv_lnd(i,j) = 300. * snowh_lnd(i,j) ! snow density ~300 kg m-3
++        !> -- sanity checks on sneqv and snowh
++        if (sneqv_lnd(i,j) /= 0.0d0 .and. snowh_lnd(i,j) == 0.0d0) then
++          if (debug_print) print *,'bad sneqv_lnd',kdt,i,j,sneqv_lnd(i,j),snowh_lnd(i,j),xlat_d(i),xlon_d(i)
++          if(sneqv_lnd(i,j) < 1.e-7.or.soilt_lnd(i,j)>273.15d0) then
++            sneqv_lnd(i,j) = 0.d0
++            snowh_lnd(i,j) = 0.d0
++          else
++            sneqv_lnd(i,j) = 300.d0 * snowh_lnd(i,j) ! snow density ~300 kg m-3
++          endif
++          if (debug_print) print *,'fixed sneqv_lnd',kdt,i,j,sneqv_lnd(i,j),snowh_lnd(i,j)
++        elseif (snowh_lnd(i,j) /= 0.0d0 .and. sneqv_lnd(i,j) == 0.0d0) then
++          if (debug_print) print *,'bad snowh_lnd',kdt,i,j,sneqv_lnd(i,j),snowh_lnd(i,j),xlat_d(i),xlon_d(i)
++          if(snowh_lnd(i,j) < 3.d-10.or.soilt_lnd(i,j)>273.15d0) then
++            snowh_lnd(i,j) = 0.d0
++            sneqv_lnd(i,j) = 0.d0
++          else
++            snowh_lnd(i,j) = 0.003d0 * sneqv_lnd(i,j) ! snow density ~300 kg m-3
++          endif
++          if (debug_print) print *,'fixed snowh_lnd',kdt,i,j,sneqv_lnd(i,j),snowh_lnd(i,j)
++        elseif (sneqv_lnd(i,j) > 0.d0 .and. snowh_lnd(i,j) > 0.d0) then
++          if (debug_print .and. abs(xlat_d(i)-testptlat).lt.2.5 .and.     &
++              abs(xlon_d(i)-testptlon).lt.2.5)then
++            print *,'sneqv_lnd(i,j)/snowh_lnd(i,j)',kdt,i,j,sneqv_lnd(i,j)/snowh_lnd(i,j),sneqv_lnd(i,j),snowh_lnd(i,j)
++          endif
++          if(sneqv_lnd(i,j)/snowh_lnd(i,j) > 500.d0) then
++            if (debug_print .and. abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++              abs(xlon_d(i)-testptlon).lt.0.5)then
++              print *,'large snow density',kdt,i,j,sneqv_lnd(i,j)/snowh_lnd(i,j),sneqv_lnd(i,j),snowh_lnd(i,j)
++              print *,'large snow density lat/lon',kdt,i,j,xlat_d(i),xlon_d(i)
++            endif
++            if(soilt_lnd(i,j)>273.15d0) then
++              snowh_lnd(i,j) = 0.d0
++              sneqv_lnd(i,j) = 0.d0
++            else
++              snowh_lnd(i,j) = 0.002d0 * sneqv_lnd(i,j)
++            endif
++            if (debug_print .and. abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++              abs(xlon_d(i)-testptlon).lt.0.5)then
++              print *,'fixed large snow density',kdt,i,j,sneqv_lnd(i,j)/snowh_lnd(i,j),sneqv_lnd(i,j),snowh_lnd(i,j)
++            endif
++          elseif(sneqv_lnd(i,j)/snowh_lnd(i,j) < 58.d0) then
++            if (debug_print .and. abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++              abs(xlon_d(i)-testptlon).lt.0.5)then
++              print *,'small snow density',kdt,i,j,sneqv_lnd(i,j)/snowh_lnd(i,j),sneqv_lnd(i,j),snowh_lnd(i,j)
++              print *,'small snow density lat/lon',kdt,i,j,xlat_d(i),xlon_d(i)
++            endif
++            if(soilt_lnd(i,j)>273.15d0) then
++              snowh_lnd(i,j) = 0.d0
++              sneqv_lnd(i,j) = 0.d0
++            else
++              sneqv_lnd(i,j) = 58.d0 * snowh_lnd(i,j)
++            endif
++            if (debug_print .and. abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++              abs(xlon_d(i)-testptlon).lt.0.5)then
++              print *,'fixed small snow density',kdt,i,j,sneqv_lnd(i,j)/snowh_lnd(i,j),sneqv_lnd(i,j),snowh_lnd(i,j)
+         endif
+-
+-        if (sneqv_lnd(i,j) > 0. .and. snowh_lnd(i,j) > 0.) then
+-          if(sneqv_lnd(i,j)/snowh_lnd(i,j) > 950.) then
+-            sneqv_lnd(i,j) = 300. * snowh_lnd(i,j)
+           endif
+         endif
+ 
+@@ -1043,64 +1115,35 @@
+         z0_lnd(i,j)  = z0rl_lnd(i)/100.
+         znt_lnd(i,j) = z0rl_lnd(i)/100.
+ 
+-        if(debug_print) then
+-          if(me==0 ) then
+-            write (0,*)'before LSMRUC for land'
+-            write (0,*)'sfcems(i,j) =',i,j,sfcems_lnd(i,j)
+-            write (0,*)'chklowq(i,j) =',i,j,chklowq(i,j)
+-            write (0,*)'chs(i,j) =',i,j,chs_lnd(i,j)
+-            write (0,*)'flqc(i,j) =',i,j,flqc_lnd(i,j)
+-            write (0,*)'flhc(i,j) =',i,j,flhc_lnd(i,j)
+-            write (0,*)'wet(i,j) =',i,j,wet(i,j)
+-            write (0,*)'cmc(i,j) =',i,j,cmc(i,j)
+-            write (0,*)'shdfac(i,j) =',i,j,shdfac(i,j)
+-            write (0,*)'alb(i,j) =',i,j,alb_lnd(i,j)
+-            write (0,*)'znt(i,j) =',i,j,znt_lnd(i,j)
+-            write (0,*)'z0(i,j) =',i,j,z0_lnd(i,j)
+-            write (0,*)'snoalb1d(i,j) =',i,j,snoalb1d_lnd(i,j)
+-            write (0,*)'landusef(i,:,j) =',i,j,landusef(i,:,j)
+-            write (0,*)'soilctop(i,:,j) =',i,j,soilctop(i,:,j)
+-            write (0,*)'nlcat=',nlcat
+-            write (0,*)'nscat=',nscat
+-            write (0,*)'qsfc(i,j) =',i,j,qsfc_lnd(i,j)
+-            write (0,*)'qvg(i,j) =',i,j,qvg_lnd(i,j)
+-            write (0,*)'qsg(i,j) =',i,j,qsg_lnd(i,j)
+-            write (0,*)'qcg(i,j) =',i,j,qcg_lnd(i,j)
+-            write (0,*)'dew(i,j) =',i,j,dew_lnd(i,j)
+-            write (0,*)'soilt(i,j) =',i,j,soilt_lnd(i,j)
+-            write (0,*)'tskin(i) =',i,j,tskin_lnd(i)
+-            write (0,*)'soilt1(i,j) =',i,j,soilt1_lnd(i,j)
+-            write (0,*)'tsnav(i,j) =',i,j,tsnav_lnd(i,j)
+-            write (0,*)'tbot(i,j) =',i,j,tbot(i,j)
+-            write (0,*)'vtype(i,j) =',i,j,vtype_lnd(i,j)
+-            write (0,*)'stype(i,j) =',i,j,stype_lnd(i,j)
+-            write (0,*)'xland(i,j) =',i,j,xland(i,j)
+-            write (0,*)'xice(i,j) =',i,j,xice(i,j)
+-            write (0,*)'iswater=',iswater
+-            write (0,*)'isice=',isice
+-            write (0,*)'xice_threshold=',xice_threshold
+-            write (0,*)'con_cp=',con_cp
+-            write (0,*)'con_rv=',con_rv
+-            write (0,*)'con_rd=',con_rd
+-            write (0,*)'con_g=',con_g
+-            write (0,*)'con_pi=',con_pi
+-            write (0,*)'con_hvap=',con_hvap
+-            write (0,*)'stbolt=',stbolt
+-            write (0,*)'smsoil(i,:,j)=',i,j,smsoil(i,:,j)
+-            write (0,*)'slsoil(i,:,j)=',i,j,slsoil(i,:,j)
+-            write (0,*)'stsoil(i,:,j)=',i,j,stsoil(i,:,j)
+-            write (0,*)'smfrsoil(i,:,j)=',i,j,smfrsoil(i,:,j)
+-            write (0,*)'keepfrsoil(i,:,j)=',i,j,keepfrsoil(i,:,j)
+-            write (0,*)'acrunoff(i,j) =',i,j,acrunoff(i,j)
+-            write (0,*)'acsn(i,j) =',i,j,acsn(i,j)
+-            write (0,*)'shdmin1d(i,j) =',i,j,shdmin1d(i,j)
+-            write (0,*)'shdmax1d(i,j) =',i,j,shdmax1d(i,j)
+-            write (0,*)'rdlai2d =',rdlai2d
+-          endif
++        !if (debug_print) then
++        !-- diagnostics for a land test point with known lat/lon
++        if (kdt < 10) then
++        if (abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++            abs(xlon_d(i)-testptlon).lt.0.5)then
++          !if(weasd_lnd(i) > 0.) &
++            print 100,'(ruc_lsm_drv before RUC land call)  i=',i,  &
++            '  lat,lon=',xlat_d(i),xlon_d(i),                      &
++            'rainc',rainc(i),'rainnc',rainnc(i),'prcp',prcp(i,j),  &
++            'graupel',graupel(i),'qc',qc(i),'sfcqv_lnd',sfcqv_lnd(i),&
++            !'snow',snow(i), 'snowncv',snowncv(i,j),                &
++            'dlwflx',dlwflx(i),'dswsfc',dswsfc(i),                 &
++            'sncovr1_lnd',sncovr1_lnd(i),'sfalb_lnd_bck',sfalb_lnd_bck(i),&
++            'albbcksol',albbcksol(i),'alb_lnd',alb_lnd(i,j),       &
++            'solnet_lnd',solnet_lnd(i,j),'t1',t1(i),               &
++            'sfcems_lnd',sfcems_lnd(i,j),'flhc_lnd',flhc_lnd(i,j), &
++            'flqc_lnd',flqc_lnd(i,j),'wet',wet(i,j),'cmc',cmc(i,j),&
++            'qcg_lnd',qcg_lnd(i,j),'dew',dew_lnd(i,j),             &
++            'znt_lnd',znt_lnd(i,j),'shdfac',shdfac(i,j),           &
++            'srflag',srflag(i),'weasd_lnd',weasd_lnd(i),           &
++            'smsoil1',smsoil(i,1,j),'slsoil',slsoil(i,1,j),        &
++            'keepfrsoil',keepfrsoil(i,1,j),                        &
++            'tsurf_lnd',tsurf_lnd(i),'tslb(i,1)',tslb(i,1)
+         endif
++        endif ! debug_print
++        !--
+ 
+ !> - Call RUC LSM lsmruc() for land.
+-      call lsmruc(                                                           &
++      call lsmruc(xlat_d(i),xlon_d(i),                                       &
+      &          delt, flag_init, lsm_cold_start, kdt, iter, nsoil,           &
+      &          graupelncv(i,j), snowncv(i,j), rainncv(i,j), raincv(i,j),    &
+      &          zs, prcp(i,j), sneqv_lnd(i,j), snowh_lnd(i,j),               &
+@@ -1108,6 +1151,7 @@
+      &          ffrozp(i,j), frpcpn,                                         &
+      &          rhosnfr(i,j), precipfr(i,j),                                 &
+ !  ---  inputs:
++     &          orog(i,j), stdev(i,j),                                       &
+      &          conflx2(i,1,j), sfcprs(i,1,j), sfctmp(i,1,j), q2(i,1,j),     &
+      &          qcatm(i,1,j), rho2(i,1,j), semis_bck(i,j), lwdn(i,j),        &
+      &          swdn(i,j), solnet_lnd(i,j), sfcems_lnd(i,j), chklowq(i,j),   &
+@@ -1128,49 +1172,53 @@
+ !  ---  input/outputs:
+      &          smsoil(i,:,j), slsoil(i,:,j), soilm(i,j), smmax(i,j),        &
+      &          stsoil(i,:,j), soilt_lnd(i,j),                               &
++     &          edir(i,j), ec(i,j), ett(i,j), esnow_lnd(i,j), snoh_lnd(i,j), &
+      &          hfx_lnd(i,j), qfx_lnd(i,j), lh_lnd(i,j),                     &
+      &          infiltr(i,j), runoff1(i,j), runoff2(i,j), acrunoff(i,j),     &
+      &          sfcexc(i,j), acceta(i,j), ssoil_lnd(i,j),                    &
+-     &          snfallac_lnd(i,j), acsn(i,j), snomlt_lnd(i,j),               &
++     &          snfallac_lnd(i,j), acsn_lnd(i,j), snomlt_lnd(i,j),           &
+      &          smfrsoil(i,:,j),keepfrsoil(i,:,j), .false.,                  &
+      &          shdmin1d(i,j), shdmax1d(i,j), rdlai2d,                       &
+      &          ims,ime, jms,jme, kms,kme,                                   &
+      &          its,ite, jts,jte, kts,kte                                    )
+         if(debug_print) then
+-          write (0,*)'after LSMRUC for land'
+-          write (0,*)'after sneqv(i,j) =',i,j,sneqv_lnd(i,j)
+-          write (0,*)'after snowh(i,j) =',i,j,snowh_lnd(i,j)
+-          write (0,*)'after sncovr(i,j) =',i,j,sncovr_lnd(i,j)
+-          write (0,*)'after vtype(i,j) =',i,j,vtype_lnd(i,j)
+-          write (0,*)'after stype(i,j) =',i,j,stype_lnd(i,j)
+-          write (0,*)'after wet(i,j) =',i,j,wet(i,j)
+-          write (0,*)'after cmc(i,j) =',i,j,cmc(i,j)
+-          write (0,*)'after qsfc(i,j) =',i,j,qsfc_lnd(i,j)
+-          write (0,*)'after qvg(i,j) =',i,j,qvg_lnd(i,j)
+-          write (0,*)'after qsg(i,j) =',i,j,qsg_lnd(i,j)
+-          write (0,*)'after qcg(i,j) =',i,j,qcg_lnd(i,j)
+-          write (0,*)'after dew(i,j) =',i,j,dew_lnd(i,j)
+-          write (0,*)'after soilt(i,j) =',i,j,soilt_lnd(i,j)
+-          write (0,*)'after tskin(i) =',i,j,tskin_lnd(i)
+-          write (0,*)'after soilt1(i,j) =',i,j,soilt1_lnd(i,j)
+-          write (0,*)'after tsnav(i,j) =',i,j,tsnav_lnd(i,j)
+-          write (0,*)'after smsoil(i,:,j)=',i,j,smsoil(i,:,j)
+-          write (0,*)'after slsoil(i,:,j)=',i,j,slsoil(i,:,j)
+-          write (0,*)'after stsoil(i,:,j)=',i,j,stsoil(i,:,j)
+-          write (0,*)'after smfrsoil(i,:,j)=',i,j,smfrsoil(i,:,j)
+-          write (0,*)'after keepfrsoil(i,:,j)=',i,j,keepfrsoil(i,:,j)
+-          write (0,*)'after soilm(i,j) =',i,j,soilm(i,j)
+-          write (0,*)'after smmax(i,j) =',i,j,smmax(i,j)
+-          write (0,*)'after hfx(i,j) =',i,j,hfx_lnd(i,j)
+-          write (0,*)'after qfx(i,j) =',i,j,qfx_lnd(i,j)
+-          write (0,*)'after lh(i,j) =',i,j,lh_lnd(i,j)
+-          write (0,*)'after infiltr(i,j) =',i,j,infiltr(i,j)
+-          write (0,*)'after runoff1(i,j) =',i,j,runoff1(i,j)
+-          write (0,*)'after runoff2(i,j) =',i,j,runoff2(i,j)
+-          write (0,*)'after ssoil(i,j) =',i,j,ssoil_lnd(i,j)
+-          write (0,*)'after snfallac(i,j) =',i,j,snfallac_lnd(i,j)
+-          write (0,*)'after acsn(i,j) =',i,j,acsn(i,j)
+-          write (0,*)'after snomlt(i,j) =',i,j,snomlt_lnd(i,j)
++        if (abs(xlat_d(i)-testptlat).lt.0.5 .and.   &
++            abs(xlon_d(i)-testptlon).lt.0.5)then
++          print 100,'(ruc_lsm_drv after RUC land call)  i=',i, &
++          '  lat,lon=',xlat_d(i),xlon_d(i),         &
++          'sneqv(i,j) =',sneqv_lnd(i,j),            &
++          'snowh(i,j) =',snowh_lnd(i,j),            &
++          'sncovr(i,j) =',sncovr_lnd(i,j),          &
++          'vtype(i,j) =',vtype_lnd(i,j),            &
++          'stype(i,j) =',stype_lnd(i,j),            &
++          'wet(i,j) =',wet(i,j),                    &
++          'cmc(i,j) =',cmc(i,j),                    &
++          'qsfc(i,j) =',qsfc_lnd(i,j),              &
++          'qvg(i,j) =',qvg_lnd(i,j),                &
++          'qsg(i,j) =',qsg_lnd(i,j),                &
++          'qcg(i,j) =',qcg_lnd(i,j),                &
++          'dew(i,j) =',dew_lnd(i,j),                &
++          'soilt(i,j) =',soilt_lnd(i,j),            &
++          'tskin(i) =',tskin_lnd(i),                &
++          'soilt1(i,j) =',soilt1_lnd(i,j),          &
++          'tsnav(i,j) =',tsnav_lnd(i,j),            &
++          'smsoil(i,:,j)=',smsoil(i,:,j),           &
++          'slsoil(i,:,j)=',slsoil(i,:,j),           &
++          'stsoil(i,:,j)=',stsoil(i,:,j),           &
++          'smfrsoil(i,:,j)=',smfrsoil(i,:,j),       &
++          'keepfrsoil(i,:,j)=',keepfrsoil(i,:,j),   &
++          'soilm(i,j) =',soilm(i,j),                &
++          'smmax(i,j) =',smmax(i,j),                &
++          'hfx(i,j) =',hfx_lnd(i,j),                &
++          'lh(i,j) =',lh_lnd(i,j),                  &
++          'infiltr(i,j) =',infiltr(i,j),            &
++          'runoff1(i,j) =',runoff1(i,j),            &
++          'runoff2(i,j) =',runoff2(i,j),            &
++          'ssoil(i,j) =',ssoil_lnd(i,j),            &
++          'snfallac(i,j) =',snfallac_lnd(i,j),      &
++          'acsn_lnd(i,j) =',acsn_lnd(i,j),          &
++          'snomlt(i,j) =',snomlt_lnd(i,j) 
++        endif 
+         endif
+ 
+ 
+@@ -1181,23 +1229,22 @@
+ !!\n \a ssoil   - soil heat flux (\f$W m^{-2}\f$: negative if downward from surface)
+ !!\n \a runoff1 - surface runoff (\f$m s^{-1}\f$), not infiltrating the surface
+ !!\n \a runoff2 - subsurface runoff (\f$m s^{-1}\f$), drainage out bottom
+-!!\n \a snoh    - phase-change heat flux from snowmelt (w m-2)
+-!!\n \a lh     - actual latent heat flux (\f$W m^{-2}\f$: positive, if upward from sfc)
+-!!\n \a hfx    - sensible heat flux (\f$W m^{-2}\f$: positive, if upward from sfc)
+-!!\n \a ssoil   - soil heat flux (\f$W m^{-2}\f$: negative if downward from surface)
+-!!\n \a runoff1 - surface runoff (\f$m s^{-1}\f$), not infiltrating the surface
+-!!\n \a runoff2 - subsurface runoff (\f$m s^{-1}\f$), drainage out bottom
+-!!\n \a snoh    - phase-change heat flux from snowmelt (w m-2)
++!!\n \a snoh    - phase-change heat flux from snowmelt (\f$W m^{-2}\f$)
+ !
+-!  --- ...  do not return the following output fields to parent model
+-!    ec      - canopy water evaporation (m s-1)
+-!    edir    - direct soil evaporation (m s-1)
++!  --- ...  units [m/s] = [g m-2 s-1]
++!    evcw (W m-2)    - canopy water evaporation flux
++!    evbs (W m-2)    - direct soil evaporation flux
++!    trans (W m-2)   - total plant transpiration
++!    edir, ec, ett - direct evaporation, evaporation of
++!              canopy water and transpiration (kg m-2 s-1)
+ !    et(nsoil)-plant transpiration from a particular root layer (m s-1)
+-!    ett     - total plant transpiration (m s-1)
+-!    esnow   - sublimation from (or deposition to if <0) snowpack (m s-1)
++!    esnow   - sublimation from (or deposition to if <0) snowpack (kg m-2 s-1)
++!    sbsno   - sublimation from (or deposition to if <0) snowpack (W m-2)
++!    hfx     - upward heat flux at the surface (W/m^2)
++!    qfx     - upward moisture flux at the surface (kg kg-1 kg m-2 s-1)
+ !    drip    - through-fall of precip and/or dew in excess of canopy
+ !              water-holding capacity (m)
+-!    snomlt  - snow melt (m) (water equivalent)
++!    snomlt  - snow melt (kg m-2) (water equivalent)
+ !    xlai    - leaf area index (dimensionless)
+ !    soilw   - available soil moisture in root zone (unitless fraction
+ !              between smcwlt and smcmax)
+@@ -1205,40 +1252,38 @@
+ !    nroot   - number of root layers, a function of veg type, determined
+ !              in subroutine redprm.
+ 
+-
+-        !evbs(i)  = edir(i,j)
+-        !evcw(i)  = ec(i,j)
+-        !trans(i) = ett(i,j)
+-        !sbsno(i) = esnow(i,j)
+-        !snohf(i) = snoh(i,j)
++        evbs(i)  = edir(i,j) * rhoh2o * con_hvap
++        evcw(i)  = ec(i,j)   * rhoh2o * con_hvap
++        trans(i) = ett(i,j)  * rhoh2o * con_hvap
++        sbsno(i) = esnow_lnd(i,j) * con_hfus
++        snohf(i) = snoh_lnd(i,j)
+ 
+         ! Interstitial
+-        evap_lnd(i)    = qfx_lnd(i,j) / rho(i)           ! kinematic
+-        hflx_lnd(i)    = hfx_lnd(i,j) / (con_cp*rho(i))  ! kinematic
++        evap_lnd(i)    = qfx_lnd(i,j) / rho(i)           ! kg kg-1 m s-1 kinematic
++        hflx_lnd(i)    = hfx_lnd(i,j) / (con_cp*rho(i))  ! K m s-1 kinematic
+         gflux_lnd(i)   = ssoil_lnd(i,j)
+         qsurf_lnd(i)   = qsfc_lnd(i,j)
+         tsurf_lnd(i)   = soilt_lnd(i,j)
+         tsnow_lnd(i)   = soilt1_lnd(i,j)
+         stm(i)         = soilm(i,j) * 1.e-3 ! convert to [m]
+ 
+-        runof (i)  = runoff1(i,j)
+-        drain (i)  = runoff2(i,j)
++        runof (i)  = runoff1(i,j) * rhoh2o ! surface kg m-2 s-1
++        drain (i)  = runoff2(i,j) * rhoh2o ! kg m-2 s-1
+ 
+         wetness(i) = wet(i,j)
+-
+-        ! tsnow(i)   = soilt1(i,j)
+         sfcqv_lnd(i)  = qvg_lnd(i,j)
+         sfcqc_lnd(i)  = qcg_lnd(i,j)
+-        !  --- ...  units [m/s] = [g m-2 s-1]
+-        rhosnf(i) = rhosnfr(i,j)
+-        !acsnow(i) = acsn(i,j)     ! kg m-2
++
++        rhosnf(i) = rhosnfr(i,j) ! kg m-3
++        acsnow_lnd(i) = acsn_lnd(i,j)     ! accum kg m-2
++        snowmt_lnd(i) = snomlt_lnd(i,j)   ! accum kg m-2
+ 
+         ! --- ... accumulated total runoff and surface runoff
+-        runoff(i)  = runoff(i)  + (drain(i)+runof(i)) * delt * 0.001 ! kg m-2
+-        srunoff(i) = srunoff(i) + runof(i) * delt * 0.001            ! kg m-2
++        runoff(i)  = runoff(i)  + (drain(i)+runof(i)) * delt  ! accum total kg m-2
++        srunoff(i) = srunoff(i) + runof(i) * delt             ! accum surface kg m-2
+ 
+         ! --- ... accumulated frozen precipitation (accumulation in lsmruc)
+-        snowfallac_lnd(i) = snfallac_lnd(i,j) ! kg m-2
++        snowfallac_lnd(i) = snfallac_lnd(i,j) ! accum kg m-2
+         !  --- ...  unit conversion (from m to mm)
+         snwdph_lnd(i)  = snowh_lnd(i,j) * 1000.0
+ 
+@@ -1257,7 +1302,7 @@
+         !-- fill in albdvis_lnd, albdnir_lnd,  albivis_lnd,  albinir_lnd, 
+         albdvis_lnd(i) = sfalb_lnd(i)
+         albdnir_lnd(i) = sfalb_lnd(i)
+-        albinir_lnd(i) = sfalb_lnd(i)
++        albivis_lnd(i) = sfalb_lnd(i)
+         albinir_lnd(i) = sfalb_lnd(i)
+ 
+         do k = 1, lsoil_ruc
+@@ -1278,23 +1323,26 @@
+    !-- ice point
+ 
+       if (debug_print) then
+-        if (abs(xlat_d(i)-testptlat).lt.2.5 .and.   &
+-            abs(xlon_d(i)-testptlon).lt.6.5)then
+-          if(weasd_lnd(i) > 0.) &
+-            print 101,'(ruc_lsm_drv ice)  i=',i,      &
+-            '  lat,lon=',xlat_d(i),xlon_d(i),'flag_ice',flag_ice(i),&
++        if (abs(xlat_d(i)-testptlat).lt.0.1 .and.   &
++            abs(xlon_d(i)-testptlon).lt.0.1)then
++          !if(weasd_ice(i) > 0.) &
++            print 101,'(ruc_lsm_drv_ice)  i=',i,      &
++            '  lat,lon=',xlat_d(i),xlon_d(i),         &
+             !'rainc',rainc(i),'rainnc',rainnc(i),      &
+             'sfcqv_ice',sfcqv_ice(i),&
+             !'dlwflx',dlwflx(i),'dswsfc',dswsfc(i),    &
+             'sncovr1_ice',sncovr1_ice(i),'sfalb_ice',sfalb_ice(i),&
+             'sfcqc_ice',sfcqc_ice(i),'tsnow_ice',tsnow_ice(i), &
+-            'prsl1',prsl1(i),'t1',t1(i),              &
+-            !'snow',snow(i), 'snowncv',snowncv(i,j),   &
++            'prsl1',prsl1(i),'t1',t1(i),'snwdph_ice ',snwdph_ice(i), &
+             'srflag',srflag(i),'weasd_ice',weasd_ice(i), &
+             'tsurf_ice',tsurf_ice(i),'tslb(i,1)',tslb(i,1)
+         endif
+       endif
+- 101      format (";;; ",a,i4,a,2f9.2/(4(a10,'='es9.2)))
++ 101      format (";;; ",a,i4,a,2f14.7/(4(a10,'='es9.2)))
++
++        edir      (i,j)  = 0.0
++        ec        (i,j)  = 0.0
++        ett       (i,j)  = 0.0
+ 
+         sncovr_ice(i,j)   = sncovr1_ice(i)
+         !-- alb_ice* is computed in setalb called from rrtmg_sw_pre.
+@@ -1313,13 +1361,13 @@
+           sfcems_ice(i,j) = semis_ice(i)
+         endif
+         cmc(i,j) = canopy(i)                     ! [mm]
+-        soilt_ice(i,j) = tsurf_ice(i)            ! clu_q2m_iter
+-        if (tsnow_ice(i) > 0. .and. tsnow_ice(i) < 273.15) then
++        soilt_ice(i,j) = tsurf_ice(i)         
++        if (tsnow_ice(i) > 150. .and. tsnow_ice(i) < 273.15) then
+           soilt1_ice(i,j) = tsnow_ice(i)
+         else
+           soilt1_ice(i,j) = tsurf_ice(i)
+         endif
+-        tsnav_ice(i,j) = 0.5*(soilt_ice(i,j) + soilt1_ice(i,j)) - 273.15
++        tsnav_ice(i,j) = min(0.,0.5*(soilt_ice(i,j) + soilt1_ice(i,j)) - 273.15)
+         do k = 1, lsoil_ruc
+           stsice  (i,k,j) = tsice(i,k)
+           smice   (i,k,j) = 1.
+@@ -1331,8 +1379,9 @@
+         wet_ice(i,j) = 1.
+ 
+         chs_ice (i,j)   = ch_ice(i) * wind(i) ! compute conductance
+-        flhc_ice(i,j)   = chs_ice(i,j) * rho(i) * con_cp ! * (1. + 0.84*q2(i,1,j))
++        flhc_ice(i,j)   = chs_ice(i,j) * rho(i) * con_cp * (1. + 0.84*q2(i,1,j))
+         flqc_ice(i,j)   = chs_ice(i,j) * rho(i) * wet_ice(i,j)
++
+         ! for output
+         cmm_ice(i) = cm_ice (i) * wind(i)
+         chh_ice(i) = chs_ice(i,j) * rho(i)
+@@ -1340,7 +1389,15 @@
+ 
+         snowh_ice(i,j) = snwdph_ice(i) * 0.001         ! convert from mm to m
+         sneqv_ice(i,j) = weasd_ice(i)                  ! [mm]
++        if(kdt == 1) then
++          snfallac_ice(i,j) = 0.
++          acsn_ice(i,j)     = 0.
++          snomlt_ice(i,j)   = 0.
++        else
+         snfallac_ice(i,j) = snowfallac_ice(i)
++          acsn_ice(i,j)     = acsnow_ice(i)
++          snomlt_ice(i,j)   = snowmt_ice(i)
++        endif
+ 
+         !> -- sanity checks on sneqv and snowh
+         if (sneqv_ice(i,j) /= 0.0 .and. snowh_ice(i,j) == 0.0) then
+@@ -1361,7 +1418,7 @@
+         znt_ice(i,j) = z0rl_ice(i)/100.
+ 
+ !> - Call RUC LSM lsmruc() for ice.
+-      call lsmruc(                                                           &
++      call lsmruc(xlat_d(i),xlon_d(i),                                       &
+      &          delt, flag_init, lsm_cold_start, kdt, iter, nsoil,           &
+      &          graupelncv(i,j), snowncv(i,j), rainncv(i,j), raincv(i,j),    &
+      &          zs, prcp(i,j), sneqv_ice(i,j), snowh_ice(i,j),               &
+@@ -1369,6 +1426,7 @@
+      &          ffrozp(i,j), frpcpn,                                         &
+      &          rhosnfr(i,j), precipfr(i,j),                                 &
+ !  ---  inputs:
++     &          orog(i,j), stdev(i,j),                                       &
+      &          conflx2(i,1,j), sfcprs(i,1,j), sfctmp(i,1,j), q2(i,1,j),     &
+      &          qcatm(i,1,j), rho2(i,1,j), semis_bck(i,j), lwdn(i,j),        &
+      &          swdn(i,j), solnet_ice(i,j), sfcems_ice(i,j), chklowq(i,j),   &
+@@ -1389,10 +1447,11 @@
+ !  ---  input/outputs:
+      &          smice(i,:,j), slice(i,:,j), soilm(i,j), smmax(i,j),          &
+      &          stsice(i,:,j), soilt_ice(i,j),                               &
++     &          edir(i,j), ec(i,j), ett(i,j), esnow_ice(i,j), snoh_ice(i,j), &
+      &          hfx_ice(i,j), qfx_ice(i,j), lh_ice(i,j),                     &
+      &          infiltr(i,j), runoff1(i,j), runoff2(i,j), acrunoff(i,j),     &
+      &          sfcexc(i,j), acceta(i,j), ssoil_ice(i,j),                    &
+-     &          snfallac_ice(i,j), acsn(i,j), snomlt_ice(i,j),               &
++     &          snfallac_ice(i,j), acsn_ice(i,j), snomlt_ice(i,j),           &
+      &          smfrice(i,:,j),keepfrice(i,:,j), .false.,                    &
+      &          shdmin1d(i,j), shdmax1d(i,j), rdlai2d,                       &
+      &          ims,ime, jms,jme, kms,kme,                                   &
+@@ -1411,19 +1470,23 @@
+         sfcqv_ice(i)  = qvg_ice(i,j)
+         sfcqc_ice(i)  = qcg_ice(i,j)
+ 
++        rhosnf(i) = rhosnfr(i,j) ! kg m-3
+         snowfallac_ice(i) = snfallac_ice(i,j) ! kg m-2
++        acsnow_ice(i)     = acsn_ice(i,j) ! kg m-2 
++        snowmt_ice(i)     = snomlt_ice(i,j) ! kg m-2
+         !  --- ...  unit conversion (from m to mm)
+-        snwdph_ice(i)  = snowh_ice(i,j) * 1000.0
+-        weasd_ice(i)   = sneqv_ice(i,j) ! mm
++        snwdph_ice(i)  = snowh_ice(i,j) * rhoh2o
++        weasd_ice(i)   = sneqv_ice(i,j) ! kg m-2
+         sncovr1_ice(i) = sncovr_ice(i,j)
+-        z0rl_ice(i) = znt_ice(i,j)*100.
++        z0rl_ice(i) = znt_ice(i,j)*100. ! cm
+         !-- semis_ice is with snow effect
+         semis_ice(i) = sfcems_ice(i,j) 
+         !-- sfalb_ice is with snow effect
+         sfalb_ice(i) = alb_ice(i,j)
++        !-- albdvis_ice,albdnir_ice,albivis_ice,albinir_ice
+         albdvis_ice(i) = sfalb_ice(i)
+         albdnir_ice(i) = sfalb_ice(i)
+-        albinir_ice(i) = sfalb_ice(i)
++        albivis_ice(i) = sfalb_ice(i)
+         albinir_ice(i) = sfalb_ice(i)
+ 
+ 
+@@ -1465,22 +1528,25 @@
+             !srflag(i)          = srflag_old(i)
+             tsnow_lnd(i)       = tsnow_lnd_old(i)
+             snowfallac_lnd(i)  = snowfallac_lnd_old(i)
+-            !acsnow(i)          = acsnow_old(i)
++            acsnow_lnd(i)      = acsnow_lnd_old(i)
+             sfcqv_lnd(i)       = sfcqv_lnd_old(i)
+             sfcqc_lnd(i)       = sfcqc_lnd_old(i)
+             wetness(i)         = wetness_old(i)
+             z0rl_lnd(i)        = z0rl_lnd_old(i)
+             sncovr1_lnd(i)     = sncovr1_lnd_old(i)
++            snowmt_lnd(i)      = snowmt_lnd_old(i)
+             !ice
+             weasd_ice(i)       = weasd_ice_old(i)
+             snwdph_ice(i)      = snwdph_ice_old(i)
+             tskin_ice(i)       = tskin_ice_old(i)
+             tsnow_ice(i)       = tsnow_ice_old(i)
+             snowfallac_ice(i)  = snowfallac_ice_old(i)
++            acsnow_ice(i)      = acsnow_ice_old(i)
+             sfcqv_ice(i)       = sfcqv_ice_old(i)
+             sfcqc_ice(i)       = sfcqc_ice_old(i)
+             z0rl_ice(i)        = z0rl_ice_old(i)
+             sncovr1_ice(i)     = sncovr1_ice_old(i)
++            snowmt_ice(i)      = snowmt_ice_old(i)
+ 
+             do k = 1, lsoil_ruc
+               smois(i,k)    = smois_old(i,k)
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/lsm_ruc.meta update-rrfs-dev-20220614/FV3/ccpp/physics/physics/lsm_ruc.meta
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/lsm_ruc.meta	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/lsm_ruc.meta	2022-06-15 03:27:52.000000000 +0000
+@@ -671,6 +671,22 @@
+   type = real
+   kind = kind_phys
+   intent = in
++[oro]
++  standard_name = height_above_mean_sea_level
++  long_name = height_above_mean_sea_level
++  units = m
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[sigma]
++  standard_name = standard_deviation_of_subgrid_orography
++  long_name = standard deviation of subgrid height_above_mean_sea_level
++  units = m
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
+ [zs]
+   standard_name = depth_of_soil_layers
+   long_name = depth of soil levels for land surface model
+@@ -1000,6 +1016,14 @@
+   type = real
+   kind = kind_phys
+   intent = in
++[con_hfus]
++  standard_name = latent_heat_of_fusion_of_water_at_0C
++  long_name = latent heat of fusion
++  units = J kg-1
++  dimensions = ()
++  type = real
++  kind = kind_phys
++  intent = in
+ [con_fvirt]
+   standard_name = ratio_of_vapor_to_dry_air_gas_constants_minus_one
+   long_name = rv/rd - 1 (rv = ideal gas constant for water vapor)
+@@ -1329,13 +1353,37 @@
+   kind = kind_phys
+   intent = inout
+ [snowfallac_lnd]
+-  standard_name = surface_snow_amount_over_land
+-  long_name = run-total snow accumulation on the ground over land
++  standard_name = surface_snow_amount_vardens_over_land
++  long_name = run-total snow accumulation on the ground with variable snow density over land
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = inout
++[acsnow_lnd]
++  standard_name = surface_snow_lwe_thickness_amount_over_land
++  long_name = run-total snowfall water equivalent over land
+   units = kg m-2
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
+   intent = inout
++[snowmt_lnd]
++  standard_name = surface_snow_melt_over_land
++  long_name = snow melt during timestep over land
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = inout
++[snohf]
++  standard_name = snow_freezing_rain_upward_latent_heat_flux
++  long_name = latent heat flux due to snow and frz rain
++  units = W m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = inout
+ [albdvis_lnd]
+   standard_name = surface_albedo_direct_visible_over_land
+   long_name = direct surface albedo visible band over land
+@@ -1465,8 +1513,24 @@
+   kind = kind_phys
+   intent = in
+ [snowfallac_ice]
+-  standard_name = surface_snow_amount_over_ice
+-  long_name = run-total snow accumulation on the ground over ice
++  standard_name = surface_snow_amount_vardens_over_ice
++  long_name = run-total snow accumulation on the ground with variable snow density over ice
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = inout
++[acsnow_ice]
++  standard_name = surface_snow_lwe_thickness_amount_over_ice
++  long_name = run-total snowfall water equivalent over ice
++  units = kg m-2
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = inout
++[snowmt_ice]
++  standard_name = surface_snow_melt_over_ice
++  long_name = snow melt during timestep over ice
+   units = kg m-2
+   dimensions = (horizontal_loop_extent)
+   type = real
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/module_mp_thompson.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_mp_thompson.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/module_mp_thompson.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_mp_thompson.F90	2022-06-14 18:37:20.000000000 +0000
+@@ -2391,11 +2391,27 @@
+ !+---+-----------------------------------------------------------------+
+ !> - Calculate y-intercept, slope values for graupel.
+ !+---+-----------------------------------------------------------------+
++! Ming Hu: go back to old version for Spring experiment 2021
++      N0_min = gonv_max
++      k_0 = kts
+       do k = kte, kts, -1
+-         ygra1 = alog10(max(1.E-9, rg(k)))
+-         zans1 = 3.0 + 2./7.*(ygra1+8.) + rand1
++         if (temp(k).ge.270.65) k_0 = MAX(k_0, k)
++      enddo
++      do k = kte, kts, -1
++         if (k.gt.k_0 .and. L_qr(k) .and. mvd_r(k).gt.100.E-6) then
++            xslw1 = 4.01 + alog10(mvd_r(k))
++         else
++            xslw1 = 0.01
++         endif
++         ygra1 = 4.31 + alog10(max(5.E-5, rg(k)))
++         zans1 = (3.1 +(100./(300.*xslw1*ygra1/(10./xslw1+1.+0.25*ygra1)+30.+10.*ygra1))) + rand1
++         if (rand1 .ne. 0.0) then
++          zans1 = MAX(2., MIN(zans1, 7.))
++         endif
+          N0_exp = 10.**(zans1)
+          N0_exp = MAX(DBLE(gonv_min), MIN(N0_exp, DBLE(gonv_max)))
++         N0_min = MIN(N0_exp, N0_min)
++         N0_exp = N0_min
+          lam_exp = (N0_exp*am_g*cgg(1)/rg(k))**oge1
+          lamg = lam_exp * (cgg(3)*ogg2*ogg1)**obmg
+          ilamg(k) = 1./lamg
+@@ -3467,11 +3483,28 @@
+ !+---+-----------------------------------------------------------------+
+ !> - Calculate y-intercept, slope values for graupel.
+ !+---+-----------------------------------------------------------------+
++! Ming Hu: go back to old version for Spring experiment 2021
++
++      N0_min = gonv_max
++      k_0 = kts
+       do k = kte, kts, -1
+-         ygra1 = alog10(max(1.E-9, rg(k)))
+-         zans1 = 3.0 + 2./7.*(ygra1+8.) + rand1
++         if (temp(k).ge.270.65) k_0 = MAX(k_0, k)
++      enddo
++      do k = kte, kts, -1
++         if (k.gt.k_0 .and. L_qr(k) .and. mvd_r(k).gt.100.E-6) then
++            xslw1 = 4.01 + alog10(mvd_r(k))
++         else
++            xslw1 = 0.01
++         endif
++         ygra1 = 4.31 + alog10(max(5.E-5, rg(k)))
++         zans1 = (3.1 +(100./(300.*xslw1*ygra1/(10./xslw1+1.+0.25*ygra1)+30.+10.*ygra1))) + rand1
++         if (rand1 .ne. 0.0) then
++          zans1 = MAX(2., MIN(zans1, 7.))
++         endif
+          N0_exp = 10.**(zans1)
+          N0_exp = MAX(DBLE(gonv_min), MIN(N0_exp, DBLE(gonv_max)))
++         N0_min = MIN(N0_exp, N0_min)
++         N0_exp = N0_min
+          lam_exp = (N0_exp*am_g*cgg(1)/rg(k))**oge1
+          lamg = lam_exp * (cgg(3)*ogg2*ogg1)**obmg
+          ilamg(k) = 1./lamg
+@@ -3826,12 +3859,15 @@
+            t3_vts = Kap0*csg(1)*ils1**cse(1)
+            t4_vts = Kap1*Mrat**mu_s*csg(7)*ils2**cse(7)
+            vts = rhof(k)*av_s * (t1_vts+t2_vts)/(t3_vts+t4_vts)
+-           if (prr_sml(k) .gt. 0.0) then
+-!           vtsk(k) = MAX(vts*vts_boost(k),                             &
+-!    &                vts*((vtrk(k)-vts*vts_boost(k))/(temp(k)-T_0)))
+-            SR = rs(k)/(rs(k)+rr(k))
+-            vtsk(k) = vts*SR + (1.-SR)*vtrk(k)
+-            !vtsk1(k)=vtsk(k)
++           if (temp(k).gt. (T_0+0.1)) then
++!Ming Hu: go back to old version for Spring experiment 2021
++            vtsk(k) = MAX(vts*vts_boost(k),                             &
++     &                vts*((vtrk(k)-vts*vts_boost(k))/(temp(k)-T_0))) !
++! DH* The version below is supposed to be a better formulation,
++! but gave worse results in RAPv5/HRRRv4 than the line above.
++                      ! this formulation for RAPv5/HRRRv4, reverted 20 Feb 2020
++!            SR = rs(k)/(rs(k)+rr(k))
++!            vtsk(k) = vts*SR + (1.-SR)*vtrk(k)
+            else
+             vtsk(k) = vts*vts_boost(k)
+             !vtsk1(k)=vtsk(k)
+@@ -3915,7 +3951,8 @@
+                                             *odzq*DT*onstep(1))
+           enddo
+ 
+-          if (rr(kts).gt.R1*10.) &
++          !if (rr(kts).gt.R1*10.) &
++          if (rr(kts).gt.R1*1000.) &
+           pptrain = pptrain + sed_r(kts)*DT*onstep(1)
+         enddo
+       else !if(.not. sedi_semi)
+@@ -4006,7 +4043,8 @@
+                                            *odzq*DT*onstep(2))
+          enddo
+ 
+-         if (ri(kts).gt.R1*10.) &
++         !if (ri(kts).gt.R1*10.) &
++         if (ri(kts).gt.R1*1000.) &
+          pptice = pptice + sed_i(kts)*DT*onstep(2)
+       enddo
+       endif
+@@ -4033,7 +4071,9 @@
+                                            *odzq*DT*onstep(3))
+          enddo
+ 
+-         if (rs(kts).gt.R1*10.) &
++         !if (rs(kts).gt.R1*10.) &
++                 !-- 8apr22 communication with Greg
++         if (rs(kts).gt.R1*1000.) &
+          pptsnow = pptsnow + sed_s(kts)*DT*onstep(3)
+       enddo
+       endif
+@@ -4061,7 +4101,9 @@
+                                            *odzq*DT*onstep(4))
+            enddo
+ 
+-           if (rg(kts).gt.R1*10.) &
++           !if (rg(kts).gt.R1*10.) &
++           !-- 8apr22 - communication with Greg
++           if (rg(kts).gt.R1*1000.) &
+            pptgraul = pptgraul + sed_g(kts)*DT*onstep(4)
+         enddo
+       else ! if(.not. sedi_semi) then 
+@@ -5809,7 +5851,7 @@
+ !! of frozen species remaining from what initially existed at the
+ !! melting level interface.
+       subroutine calc_refl10cm (qv1d, qc1d, qr1d, nr1d, qs1d, qg1d, &
+-               t1d, p1d, dBZ, rand1, kts, kte, ii, jj, melti,       &
++               t1d, p1d, dBZ, rand1, kts, kte, ii, jj, melti_org,       &
+                vt_dBZ, first_time_step)
+ 
+       IMPLICIT NONE
+@@ -5844,7 +5886,8 @@
+       DOUBLE PRECISION:: fmelt_s, fmelt_g
+ 
+       INTEGER:: i, k, k_0, kbot, n
+-      LOGICAL, INTENT(IN):: melti
++      LOGICAL, INTENT(IN):: melti_org
++      LOGICAL :: melti
+       LOGICAL, DIMENSION(kts:kte):: L_qr, L_qs, L_qg
+ 
+       DOUBLE PRECISION:: cback, x, eta, f_d
+@@ -5866,6 +5909,11 @@
+          allow_wet_graupel = .true.
+       endif
+ 
++!Ming Hu hardwired for Spring Experiment testing
++      allow_wet_snow = .true.
++      allow_wet_graupel = .false.
++      melti=.true.
++
+       do k = kts, kte
+          dBZ(k) = -35.0
+       enddo
+@@ -5977,16 +6025,34 @@
+ !+---+-----------------------------------------------------------------+
+ 
+       if (ANY(L_qg .eqv. .true.)) then
++! Ming Hu: go back to old version for Spring experiment 2021
++
++      N0_min = gonv_max
++      k_0 = kts
+       do k = kte, kts, -1
+-         ygra1 = alog10(max(1.E-9, rg(k)))
+-         zans1 = 3.0 + 2./7.*(ygra1+8.) + rand1
++         if (temp(k).ge.270.65) k_0 = MAX(k_0, k)
++      enddo
++      do k = kte, kts, -1
++         if (k.gt.k_0 .and. L_qr(k) .and. mvd_r(k).gt.100.E-6) then
++            xslw1 = 4.01 + alog10(mvd_r(k))
++         else
++            xslw1 = 0.01
++         endif
++         ygra1 = 4.31 + alog10(max(5.E-5, rg(k)))
++         zans1 = (3.1 +(100./(300.*xslw1*ygra1/(10./xslw1+1.+0.25*ygra1)+30.+10.*ygra1))) + rand1
++         if (rand1 .ne. 0.0) then
++          zans1 = MAX(2., MIN(zans1, 7.))
++         endif
+          N0_exp = 10.**(zans1)
+          N0_exp = MAX(DBLE(gonv_min), MIN(N0_exp, DBLE(gonv_max)))
++         N0_min = MIN(N0_exp, N0_min)
++         N0_exp = N0_min
+          lam_exp = (N0_exp*am_g*cgg(1)/rg(k))**oge1
+          lamg = lam_exp * (cgg(3)*ogg2*ogg1)**obmg
+          ilamg(k) = 1./lamg
+          N0_g(k) = N0_exp/(cgg(2)*lam_exp) * lamg**cge(2)
+       enddo
++
+       endif
+ 
+ !+---+-----------------------------------------------------------------+
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/module_sf_mynn.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_sf_mynn.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/module_sf_mynn.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_sf_mynn.F90	2022-06-14 18:43:11.000000000 +0000
+@@ -111,6 +111,10 @@
+   INTEGER, PARAMETER :: debug_code = 0  !0: no extra ouput
+                                         !1: check input
+                                         !2: everything - heavy I/O
++  LOGICAL, PARAMETER :: compute_diag = .false.
++  LOGICAL, PARAMETER :: compute_flux = .true.  !shouldn't need compute 
++               ! these in FV3. They will be written over anyway.
++               ! Computing the fluxes here is leftover from the WRF world.
+ 
+   REAL,   DIMENSION(0:1000 ),SAVE :: psim_stab,psim_unstab, &
+                                      psih_stab,psih_unstab
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/module_sf_ruclsm.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_sf_ruclsm.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/module_sf_ruclsm.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/module_sf_ruclsm.F90	2022-06-14 18:25:42.000000000 +0000
+@@ -59,11 +59,11 @@
+ !! \cite Smirnova_1997 and Smirnova et al.(2000) \cite Smirnova_2000 
+ !>\section gen_lsmruc GSD RUC LSM General Algorithm
+ !! @{
+-    SUBROUTINE LSMRUC(                                           &
++    SUBROUTINE LSMRUC(xlat,xlon,                                 &
+                    DT,init,lsm_cold_start,KTAU,iter,NSL,         &
+                    graupelncv,snowncv,rainncv,raincv,            &
+                    ZS,RAINBL,SNOW,SNOWH,SNOWC,FRZFRAC,frpcpn,    &
+-                   rhosnf,precipfr,                              &
++                   rhosnf,precipfr, hgt,stdev,                   &
+                    Z3D,P8W,T3D,QV3D,QC3D,RHO3D,EMISBCK,          &
+                    GLW,GSWdn,GSW,EMISS,CHKLOWQ, CHS,             &
+                    FLQC,FLHC,MAVAIL,CANWAT,VEGFRA,ALB,ZNT,       &
+@@ -75,7 +75,8 @@
+                    ISWATER,ISICE,XICE,XICE_THRESHOLD,            &
+                    CP,RV,RD,G0,PI,LV,STBOLT,                     &
+                    SOILMOIS,SH2O,SMAVAIL,SMMAX,                  &
+-                   TSO,SOILT,HFX,QFX,LH,INFILTR,                 &
++                   TSO,SOILT,EDIR,EC,ETT,SUBLIM,SNOH,            &
++                   HFX,QFX,LH,INFILTR,                           &
+                    RUNOFF1,RUNOFF2,ACRUNOFF,SFCEXC,              &
+                    SFCEVP,GRDFLX,SNOWFALLAC,ACSNOW,SNOM,         &
+                    SMFR3D,KEEPFR3DFLAG,                          &
+@@ -133,7 +134,7 @@
+ !-- XLAND       land mask (1 for land, 2 for water)
+ !-- CP          heat capacity at constant pressure for dry air (J/kg/K)
+ !-- G0          acceleration due to gravity (m/s^2)
+-!-- LV          latent heat of melting (J/kg)
++!-- LV          latent heat of evaporation (J/kg)
+ !-- STBOLT      Stefan-Boltzmann constant (W/m^2/K^4)
+ !    SOILMOIS - soil moisture content (volumetric fraction)
+ !         TSO - soil temp (K)
+@@ -144,9 +145,9 @@
+ !   SFCRUNOFF - ground surface runoff [mm]
+ !   UDRUNOFF - underground runoff [mm]
+ !   ACRUNOFF - run-total surface runoff [mm]
+-!   SFCEVP - total evaporation in [kg/m^2]
++!   SFCEVP - total time-step evaporation in [kg/m^2]
+ !   GRDFLX - soil heat flux (W/m^2: negative, if downward from surface)
+-!   SNOWFALLAC - run-total snowfall accumulation [m]   
++!   SNOWFALLAC - run-total snowfall accumulation [mm]   
+ !   ACSNOW - run-toral SWE of snowfall [mm]   
+ !-- CHKLOWQ - is either 0 or 1 (so far set equal to 1).
+ !--           used only in MYJPBL. 
+@@ -165,6 +166,7 @@
+ !   INTEGER,     PARAMETER            ::     nzss=5
+ !   INTEGER,     PARAMETER            ::     nddzs=2*(nzss-2)
+ 
++   REAL,       INTENT(IN   )    ::     xlat,xlon
+    REAL,       INTENT(IN   )    ::     DT
+    LOGICAL,    INTENT(IN   )    ::     myj,frpcpn,init,lsm_cold_start
+    INTEGER,    INTENT(IN   )    ::     NLCAT, NSCAT ! , mosaic_lu, mosaic_soil
+@@ -207,6 +209,8 @@
+ 
+    REAL, DIMENSION( ims:ime , jms:jme ), INTENT(IN )::   SHDMAX
+    REAL, DIMENSION( ims:ime , jms:jme ), INTENT(IN )::   SHDMIN
++   REAL, DIMENSION( ims:ime , jms:jme ), INTENT(IN )::   hgt
++   REAL, DIMENSION( ims:ime , jms:jme ), INTENT(IN )::   stdev
+    LOGICAL, intent(in) :: rdlai2d
+ 
+    REAL,       DIMENSION( 1:nsl), INTENT(IN   )      ::      ZS
+@@ -248,6 +252,11 @@
+                                                             HFX, &
+                                                             QFX, &
+                                                              LH, &
++                                                           EDIR, &
++                                                             EC, &
++                                                            ETT, &
++                                                         SUBLIM, &
++                                                           SNOH, &
+                                                          SFCEVP, &
+                                                         RUNOFF1, &
+                                                         RUNOFF2, &
+@@ -276,12 +285,7 @@
+                                                            ZNTL, &
+                                                         LMAVAIL, &
+                                                           SMELT, &
+-                                                           SNOH, &
+                                                           SNFLX, &
+-                                                           EDIR, &
+-                                                             EC, &
+-                                                            ETT, &
+-                                                         SUBLIM, &
+                                                            sflx, &
+                                                             smf, &
+                                                           EVAPL, &
+@@ -391,6 +395,9 @@
+    INTEGER   ::  k1,k2
+    logical :: debug_print
+ 
++   !-- diagnostic point
++   real (kind=kind_phys) :: testptlat, testptlon
++
+ !-----------------------------------------------------------------
+ !   
+      debug_print = .false.
+@@ -400,6 +407,12 @@
+          NZS=NSL
+          NDDZS=2*(nzs-2)
+ 
++        !--
++        testptlat = 41.02 !42.05 !39.0 !74.12 !29.5 
++        testptlon = 284.50 !286.75 !280.6 !164.0 !283.0 
++        !--
++
++
+ !> - Table TBQ is for resolution of balance equation in vilka()
+         CQ=173.15-.05
+         R273=1./273.15
+@@ -423,44 +436,50 @@
+ !> - Initialize soil/vegetation parameters
+ !--- This is temporary until SI is added to mass coordinate ---!!!!!
+ 
+-     if(init .and. (lsm_cold_start) .and. iter == 1) then
++    if(init .and. iter == 1) then
++
++     if( lsm_cold_start ) then
++     !-- beginning of cold-start
+      DO J=jts,jte
+          DO i=its,ite
+-!            do k=1,nsl
+-!       keepfr3dflag(i,k,j)=0.
+-!            enddo
+-!>  - Initializing snow fraction, thereshold = 32 mm of snow water 
+-!!    or ~100 mm of snow height
+ !
+-!           snowc(i,j) = min(1.,snow(i,j)/32.)
+-!           soilt1(i,j)=soilt(i,j)
+-!          if(snow(i,j).le.32.) soilt1(i,j)=tso(i,1,j)
+-!>  - Initializing inside snow temp if it is not defined
++!>  - Initializing inside-snow temp if it is not defined
+         IF((soilt1(i,j) .LT. 170.) .or. (soilt1(i,j) .GT.400.)) THEN
+-            IF(snow(i,j).gt.32.) THEN
+-              soilt1(i,j)=0.5*(soilt(i,j)+tso(i,1,j))
++             IF(snowc(i,j).gt.0.) THEN
++               soilt1(i,j)=min(273.15,0.5*(soilt(i,j)+tso(i,1,j)) )
+               IF (debug_print ) THEN
+                   print *, &
+-                 'Temperature inside snow is initialized in RUCLSM ', soilt1(i,j),i,j
++                  'Temperature inside snow is initialized in RUCLSM ', soilt1(i,j),i,xlat,xlon
+               ENDIF
+             ELSE
+               soilt1(i,j) = tso(i,1,j)
+             ENDIF
+         ENDIF
+-           tsnav(i,j) =0.5*(soilt(i,j)+tso(i,1,j))-273.15
+-           qcg  (i,j) =0.
++           tsnav(i,j) =min(0.,0.5*(soilt(i,j)+tso(i,1,j))-273.15)
++           !- 10feb22 - limit snow albedo at high elevations
++           !- based on Roesch et al., Climate Dynamics (2001),17:933-946
++           if(hgt(i,j) > 2500.) then
++             snoalb(i,j) = min(0.65,snoalb(i,j))
++           endif
++
+            patmb=P8w(i,kms,j)*1.e-2
+            QSG  (i,j) = QSN(SOILT(i,j),TBQ)/PATMB
+-        IF((qvg(i,j) .LE. 0.) .or. (qvg(i,j) .GT.0.1)) THEN
+-           !17sept19 - bad approximation with very low mavail.
+-           !qvg(i,j) = QSG(i,j)*mavail(i,j)
++           
++           if((qcg(i,j) < 0.) .or. (qcg(i,j) > 0.1)) then
++             qcg  (i,j) = qc3d(i,1,j)
++             if (debug_print ) then
++               print *, 'QCG is initialized in RUCLSM ', qcg(i,j),qc3d(i,1,j),i,xlat,xlon
++             endif
++           endif
++
++           if((qvg(i,j) .LE. 0.) .or. (qvg(i,j) .GT.0.1)) then
+            qvg  (i,j) = qv3d(i,1,j)
+-          IF (debug_print ) THEN
+-           print *, &
+-          'QVG is initialized in RUCLSM ', qvg(i,j),mavail(i,j),qsg(i,j),i,j
+-          ENDIF
+-        ENDIF
+-!           qsfc(i,j) = qvg(i,j)/(1.+qvg(i,j))
++             if (debug_print ) then
++               print *, 'QVG is initialized in RUCLSM ', qvg(i,j),mavail(i,j),qsg(i,j),i,xlat,xlon
++             endif
++           endif
++           qsfc(i,j) = qvg(i,j)/(1.+qvg(i,j))
++
+            SMELT(i,j) = 0.
+            SNOM (i,j) = 0.
+            ACSNOW(i,j) = 0.
+@@ -483,8 +502,6 @@
+            acwaterbudget(i,j) = 0.
+            smtotold(i,j)=0.
+            canwatold(i,j)=0.
+-! Temporarily!!!
+-!           canwat(i,j)=0.
+ 
+ !>  - For RUC LSM CHKLOWQ needed for MYJPBL should 
+ !! 1 because is actual specific humidity at the surface, and
+@@ -508,13 +525,50 @@
+            soilice(k)=0.
+            soiliqw(k)=0.
+         enddo
+-     else ! .not. init==true.
++
++     else 
++     !-- restart
+        DO J=jts,jte
+          DO i=its,ite
++           SMELT(i,j) = 0.
++           PRECIPFR(i,j) = 0.
++           RHOSNF(i,j) = -1.e3 ! non-zero flag
++           SNFLX(i,j) = 0.
++           DEW  (i,j) = 0.
++           PC   (i,j) = 0.
++           zntl (i,j) = 0.
++           RUNOFF1(i,j) = 0.
++           RUNOFF2(i,j) = 0.
+            SFCRUNOFF(i,j) = 0.
+            UDRUNOFF(i,j) = 0.
++           emissl (i,j) = 0.
++           budget(i,j) = 0.
++           acbudget(i,j) = 0.
++           waterbudget(i,j) = 0.
++           acwaterbudget(i,j) = 0.
++           smtotold(i,j)=0.
++           canwatold(i,j)=0.
++           chklowq(i,j) = 1.
++           infiltr(i,j) = 0.
++           snoh  (i,j) = 0.
++           edir  (i,j) = 0.
++           ec    (i,j) = 0.
++           ett   (i,j) = 0.
++           sublim(i,j) = 0.
++           sflx  (i,j) = 0.
++           smf   (i,j) = 0.
++           evapl (i,j) = 0.
++           prcpl (i,j) = 0.
+          ENDDO
+        ENDDO
++
++       infiltrp = 0.
++       do k=1,nsl
++         soilice(k)=0.
++         soiliqw(k)=0.
++       enddo
++
++      endif ! cold start
+      endif ! init==.true.
+ 
+ !-----------------------------------------------------------------
+@@ -531,22 +585,16 @@
+       DO i=its,ite
+ 
+     IF (debug_print ) THEN
+-!     if(j==10) then
+-      print *,' IN LSMRUC ','ims,ime,jms,jme,its,ite,jts,jte,nzs', &
+-                ims,ime,jms,jme,its,ite,jts,jte,nzs
+-      print *,' IVGTYP, ISLTYP ', ivgtyp(i,j),isltyp(i,j)
+-      print *,' MAVAIL ', mavail(i,j)
+-      print *,' SOILT,QVG,P8w',soilt(i,j),qvg(i,j),p8w(i,1,j)
+-      print *, 'LSMRUC, I,J,xland, QFX,HFX from SFCLAY',i,j,xland(i,j), &
+-                  qfx(i,j),hfx(i,j)
+-      print *, ' GSW, GLW =',gsw(i,j),glw(i,j)
+-      print *, 'SOILT, TSO start of time step =',soilt(i,j),(tso(i,k,j),k=1,nsl)
+-      print *, 'SOILMOIS start of time step =',(soilmois(i,k,j),k=1,nsl)
+-      print *, 'SMFROZEN start of time step =',(smfr3d(i,k,j),k=1,nsl)
+-      print *, ' I,J=, after SFCLAY CHS,FLHC ',i,j,chs(i,j),flhc(i,j)
+-      print *, 'LSMRUC, IVGTYP,ISLTYP,ALB = ', ivgtyp(i,j),isltyp(i,j),alb(i,j),i,j
+-      print *, 'LSMRUC  I,J,DT,RAINBL =',I,J,dt,RAINBL(i,j)
+-      print *, 'XLAND ---->, ivgtype,isoiltyp,i,j',xland(i,j),ivgtyp(i,j),isltyp(i,j),i,j
++       if (abs(xlat-testptlat).lt.0.2 .and.                         &
++           abs(xlon-testptlon).lt.0.2)then
++         print 100,'(RUC start)  i=',i,'  lat,lon=',xlat,xlon,      &
++         'mavail ', mavail(i,j),' soilt',soilt(i,j),'qvg ',qvg(i,j),&
++         'p8w',p8w(i,1,j),'sflay qfx',qfx(i,j),'sflay hfx',hfx(i,j),&
++         'gsw ',gsw(i,j),'glw ',glw(i,j),'soilt ',soilt(i,j),       &
++         'chs ',chs(i,j),'flqc ',flhc(i,j),'alb ',alb(i,j),         &
++         'rainbl ',rainbl(i,j),'dt ',dt
++         print *,'nzs',nzs, 'ivgtyp ',ivgtyp(i,j),'isltyp ',isltyp(i,j)
++      endif
+     ENDIF
+ 
+ 
+@@ -655,7 +703,10 @@
+         NZS1=NZS-1
+ !-----
+     IF (debug_print ) THEN
++      if (abs(xlat-testptlat).lt.0.2 .and.                           &
++          abs(xlon-testptlon).lt.0.2)then
+          print *,' DT,NZS1, ZSMAIN, ZSHALF --->', dt,nzs1,zsmain,zshalf
++      endif
+     ENDIF
+ 
+         DO  K=2,NZS1
+@@ -694,7 +745,7 @@
+ !           ! rooting depth
+ 
+         RHONEWSN = 200.
+-       if(SNOW(i,j).gt.0. .and. SNOWH(i,j).gt.0.) then
++       if(SNOW(i,j).gt.0. .and. SNOWH(i,j).gt.0.02) then
+         RHOSN = SNOW(i,j)/SNOWH(i,j)
+        else
+         RHOSN = 300.
+@@ -702,8 +753,11 @@
+ 
+     IF (debug_print ) THEN
+       if(init) then
+-           print *,'before SOILVEGIN - z0,znt(195,254)',z0(i,j),znt(i,j)
+-           print *,'ILAND, ISOIL =',i,j,iland,isoil
++        if (abs(xlat-testptlat).lt.0.2 .and.                           &
++            abs(xlon-testptlon).lt.0.2)then
++           print *,'before SOILVEGIN - z0,znt',i,z0(i,j),znt(i,j)
++           print *,'ILAND, ISOIL =',i,iland,isoil
++        endif
+       endif
+     ENDIF
+  
+@@ -719,21 +773,21 @@
+        EMISBCK(I,J) = EMISSL(I,J)
+ 
+     IF (debug_print ) THEN
+-      if(init) &
+-         print *,'after SOILVEGIN - z0,znt(1,26),lai(1,26)',z0(i,j),znt(i,j),lai(i,j)
+-
+       if(init)then
++        if (abs(xlat-testptlat).lt.0.2 .and.                           &
++            abs(xlon-testptlon).lt.0.2)then
++         print *,'after SOILVEGIN - z0,znt,lai',i,z0(i,j),znt(i,j),lai(i,j)
+          print *,'NLCAT,iland,EMISSL(I,J),PC(I,J),ZNT(I,J),LAI(I,J)', &
+                   NLCAT,iland,EMISSL(I,J),PC(I,J),ZNT(I,J),LAI(I,J),i,j
+          print *,'NSCAT,QWRTZ,RHOCS,BCLH,DQM,KSAT,PSIS,QMIN,REF,WILT',&
+                  NSCAT,QWRTZ,RHOCS,BCLH,DQM,KSAT,PSIS,QMIN,REF,WILT,i,j
+       endif
++      endif
+     ENDIF
+ 
+         CN=CFACTR_DATA   ! exponent
+ !        SAT=max(1.e-5,(min(5.e-4,(CMCMAX_DATA * (1.-exp(-0.5*lai(i,j))) * 0.01*VEGFRA(I,J))))) ! canopy water saturated
+         SAT = 5.e-4  ! units [m]
+-!  if(i==666.and.j==282)  print *,'second 666,282 - sat',sat
+ 
+ !-- definition of number of soil levels in the rooting zone
+ !     IF(iforest(ivgtyp(i,j)).ne.1) THEN
+@@ -820,7 +874,6 @@
+ 
+ ! LAND POINT OR SEA ICE
+        if(xice(i,j).ge.xice_threshold) then
+-!       if(IVGTYP(i,j).eq.isice) then
+            SEAICE(i,j)=1.
+        else
+            SEAICE(i,j)=0.
+@@ -882,24 +935,34 @@
+               LMAVAIL(I,J)=max(0.00001,min(1.,soilm1d(1)/(ref-qmin)))
+ 
+     IF (debug_print ) THEN
++      if (abs(xlat-testptlat).lt.0.2 .and.                           &
++          abs(xlon-testptlon).lt.0.2)then
+    print *,'LAND, i,j,tso1d,soilm1d,PATM,TABS,QVATM,QCATM,RHO',  &
+                   i,j,tso1d,soilm1d,PATM,TABS,QVATM,QCATM,RHO
+    print *,'CONFLX =',CONFLX 
+    print *,'SMFRKEEP,KEEPFR   ',SMFRKEEP,KEEPFR
++      endif
+     ENDIF
+ 
+         smtotold(i,j)=0.
+-      do k=1,nzs-1
++
++      !do k=1,nzs-1
++      do k=1,nroot
+         smtotold(i,j)=smtotold(i,j)+(qmin+soilm1d(k))*             &
+                     (zshalf(k+1)-zshalf(k))
+       enddo
+ 
+-        smtotold(i,j)=smtotold(i,j)+(qmin+soilm1d(nzs))*           &
+-                    (zsmain(nzs)-zshalf(nzs))
++        !smtotold(i,j)=smtotold(i,j)+(qmin+soilm1d(nzs))*           &
++        !            (zsmain(nzs)-zshalf(nzs))
++       if (debug_print .and. abs(xlat-testptlat).lt.0.2          &
++          .and. abs(xlon-testptlon).lt.0.2) then
++         print *,'Old soilm1d ',i,soilm1d
++       endif
+ 
+         canwatold(i,j) = canwatr
+ !-----------------------------------------------------------------
+          CALL SFCTMP (debug_print, dt,ktau,conflx,i,j,           &
++                xlat, xlon, testptlat, testptlon,                &
+ !--- input variables
+                 nzs,nddzs,nroot,meltfactor,                      &   !added meltfactor
+                 iland,isoil,ivgtyp(i,j),isltyp(i,j),             &
+@@ -911,7 +974,8 @@
+                 EMISSL(I,J),EMISBCK(I,J),                        &
+                 QKMS,TKMS,PC(I,J),LMAVAIL(I,J),                  &
+                 canwatr,vegfra(I,J),alb(I,J),znt(I,J),           &
+-                snoalb(i,j),albbck(i,j),lai(i,j),                &   !new
++                snoalb(i,j),albbck(i,j),lai(i,j),                &
++                hgt(i,j),stdev(i,j),                             &   !new
+                 myj,seaice(i,j),isice,                           &
+ !--- soil fixed fields
+                 QWRTZ,                                           &
+@@ -987,25 +1051,37 @@
+         smavail(i,j) = 0.
+         smmax (i,j)  = 0.  
+ 
+-      do k=1,nzs-1
++      !do k=1,nzs-1
++      !-- root-zone soil moisture
++      do k=1,nroot
+         smavail(i,j)=smavail(i,j)+(qmin+soilm1d(k))*             &
+                     (zshalf(k+1)-zshalf(k))
+         smmax (i,j) =smmax (i,j)+(qmin+dqm)*                     &
+                     (zshalf(k+1)-zshalf(k))
+       enddo
+ 
+-        smavail(i,j)=smavail(i,j)+(qmin+soilm1d(nzs))*           &
+-                    (zsmain(nzs)-zshalf(nzs))
+-        smmax (i,j) =smmax (i,j)+(qmin+dqm)*                     &
+-                    (zsmain(nzs)-zshalf(nzs))
++        !smavail(i,j)=smavail(i,j)+(qmin+soilm1d(nzs))*           &
++        !            (zsmain(nzs)-zshalf(nzs))
++        !smmax (i,j) =smmax (i,j)+(qmin+dqm)*                     &
++        !            (zsmain(nzs)-zshalf(nzs))
+ 
++     if (debug_print) then
++       if (abs(xlat-testptlat).lt.0.2 .and. abs(xlon-testptlon).lt.0.2)then
++         print 100,'(RUC runoff)  i=',i,'  lat,lon=',xlat,xlon,  &
++         'RUNOFF1', RUNOFF1(I,J), 'RUNOFF2 ',RUNOFF2(I,J),   &
++         'edir ',edir(I,J),'ec ',ec(I,J),'ett ',ett(I,J)
++       endif
++     endif
+ !--- Convert the water unit into mm
+-        SFCRUNOFF(I,J) = SFCRUNOFF(I,J)+RUNOFF1(I,J)*DT*1000.0
+-        UDRUNOFF (I,J) = UDRUNOFF(I,J)+RUNOFF2(I,J)*DT*1000.0
+-        ACRUNOFF(I,J)  = ACRUNOFF(I,J)+(RUNOFF1(I,J)+RUNOFF2(I,J))*DT*1000.0
+-        SMAVAIL  (I,J) = SMAVAIL(I,J) * 1000.
++        !-- three lines below are commented because accumulation
++        !   happens in sfc_drv_ruc
++        !SFCRUNOFF(I,J) = SFCRUNOFF(I,J)+RUNOFF1(I,J)*DT*1000.0
++        !UDRUNOFF (I,J) = UDRUNOFF(I,J)+RUNOFF2(I,J)*DT*1000.0
++        !ACRUNOFF (I,J) = ACRUNOFF(i,j)+UDRUNOFF(I,J)+RUNOFF2(I,J)*DT*1000.0
++        ACRUNOFF(I,J)  = (RUNOFF1(I,J)+RUNOFF2(I,J))*DT*1000.0
++        SMAVAIL  (I,J) = SMAVAIL(I,J) * 1000. ! mm
+         SMMAX    (I,J) = SMMAX(I,J) * 1000.
+-        smtotold (I,J) = smtotold(I,J) * 1000.
++        smtotold (I,J) = smtotold(I,J) * 1000. ! mm
+ 
+         do k=1,nzs
+ 
+@@ -1025,7 +1101,7 @@
+ !tgs add together dew and cloud at the ground surface
+ !30july13        qcg(i,j)=qcg(i,j)+dew(i,j)/qkms
+ 
+-        Z0       (I,J) = ZNT (I,J)
++        !Z0       (I,J) = ZNT (I,J)
+         SFCEXC   (I,J) = TKMS
+         patmb=P8w(i,1,j)*1.e-2
+         Q2SAT=QSN(TABS,TBQ)/PATMB
+@@ -1042,13 +1118,6 @@
+ !          CHKLOWQ(I,J)=1.
+ !      endif
+ 
+-    IF (debug_print ) THEN
+-      if(CHKLOWQ(I,J).eq.0.) then
+-   print *,'i,j,CHKLOWQ',  &
+-                  i,j,CHKLOWQ(I,J)
+-      endif
+-    ENDIF
+-
+         if(snow(i,j)==0.) EMISSL(i,j) = EMISBCK(i,j)
+         EMISS (I,J) = EMISSL(I,J)
+ ! SNOW is in [mm], SNWE is in [m]; CANWAT is in mm, CANWATR is in m
+@@ -1057,13 +1126,17 @@
+         CANWAT (I,J) = CANWATR*1000.
+ 
+ if (debug_print) then
++       if (abs(xlat-testptlat).lt.0.2 .and. abs(xlon-testptlon).lt.0.2)then
+      print *,'snow(i,j),soilt(i,j),xice(i,j),tso(i,:,j)',snow(i,j),soilt(i,j),xice(i,j),tso(i,:,j)
+ endif
++     endif
+         INFILTR(I,J) = INFILTRP
+ 
+         MAVAIL (i,j) = LMAVAIL(I,J)  
+     IF (debug_print ) THEN
++      if (abs(xlat-testptlat).lt.0.2 .and. abs(xlon-testptlon).lt.0.2)then
+        print *,' LAND, I=,J=, QFX, HFX after SFCTMP', i,j,lh(i,j),hfx(i,j)
++      endif
+     ENDIF
+ !!!        QFX    (I,J) = LH(I,J)/LV
+         SFCEVP (I,J) = SFCEVP (I,J) + QFX (I,J) * DT
+@@ -1077,9 +1150,9 @@
+ !       endif
+ 
+ !--- SNOWC snow cover flag
+-       if(snowfrac > 0. .and. xice(i,j).ge.xice_threshold ) then
+-           SNOWFRAC = SNOWFRAC*XICE(I,J)
+-       endif
++       !if(snowfrac > 0. .and. xice(i,j).ge.xice_threshold ) then
++       !    SNOWFRAC = SNOWFRAC*XICE(I,J)
++       !endif
+ 
+        SNOWC(I,J)=SNOWFRAC
+ 
+@@ -1101,20 +1174,34 @@
+ !       endif
+ !        budget(i,j)=budget(i,j)-smf(i,j)
+ 
++    if (debug_print ) then
++     if (abs(xlat-testptlat).lt.0.2 .and.   &
++         abs(xlon-testptlon).lt.0.2)then
++     !-- compute budget for a test point
+        ac=0.
+        as=0.
++       wb=0.
+ 
+-       ac=max(0.,canwat(i,j)-canwatold(i,j)*1.e3)
+-       as=max(0.,snwe-snowold(i,j))
+-       wb =rainbl(i,j)+smelt(i,j)*dt*1.e3 & ! source
+-                      -qfx(i,j)*dt &
+-                      -runoff1(i,j)*dt*1.e3-runoff2(i,j)*dt*1.e3 &
+-                      -ac-as - (smavail(i,j)-smtotold(i,j))
+-
++       ac=canwat(i,j)-canwatold(i,j)*1.e3 ! canopy water change
++       as=snwe-snowold(i,j) ! SWE change
++       wb = smavail(i,j)-smtotold(i,j)
+        waterbudget(i,j)=rainbl(i,j)+smelt(i,j)*dt*1.e3 & ! source
+                       -qfx(i,j)*dt &
+                       -runoff1(i,j)*dt*1.e3-runoff2(i,j)*dt*1.e3 &
+-                      -ac-as - (smavail(i,j)-smtotold(i,j))
++                      -ac-as ! - (smavail(i,j)-smtotold(i,j))
++
++       print *,'soilm1d ',i,soilm1d
++       print 100,'(RUC budgets)  i=',i,'  lat,lon=',xlat,xlon,                     &
++            'budget ',budget(i,j),'waterbudget',waterbudget(i,j),                  &
++            'rainbl ',rainbl(i,j),'runoff1 ',runoff1(i,j),                         &
++            'smelt ',smelt(i,j)*dt*1.e3,'smc change ',wb,                          &
++            'snwe change ',as,'canw change ',ac,'runoff2 ',runoff2(i,j),           &
++            'qfx*dt ',qfx(i,j)*dt,'smavail ',smavail(i,j),'smcold',smtotold(i,j)
++     endif
++    endif
++ 100      format (";;; ",a,i4,a,2f14.7/(4(a10,'='es14.7)))
++        !--
++
+ 
+ 
+ !       waterbudget(i,j)=rainbl(i,j)-qfx(i,j)*dt-(smavail(i,j)-smtotold(i,j)) &
+@@ -1124,27 +1211,29 @@
+ !!!!TEST use  LH to check water budget
+ !          GRDFLX (I,J) = waterbudget(i,j) 
+ 
+-    IF (debug_print ) THEN
+-  print *,'Smf=',smf(i,j),i,j
+-  print *,'Budget',budget(i,j),i,j
+-  print *,'RUNOFF2= ', i,j,runoff2(i,j)
+-  print *,'Water budget ', i,j,waterbudget(i,j),'wb=',wb
+-  print *,'rainbl,qfx*dt,runoff1,smelt*dt*1.e3,smchange', &
+-          i,j,rainbl(i,j),qfx(i,j)*dt,runoff1(i,j)*dt*1.e3, &
+-          smelt(i,j)*dt*1.e3, &
+-          (smavail(i,j)-smtotold(i,j))
+-
+-  print *,'SNOW,SNOWold',i,j,snwe,snowold(i,j)
+-  print *,'SNOW-SNOWold',i,j,max(0.,snwe-snowold(i,j))
+-  print *,'CANWATold, canwat ',i,j,canwatold(i,j),canwat(i,j)
+-  print *,'canwat(i,j)-canwatold(i,j)',max(0.,canwat(i,j)-canwatold(i,j))
+-    ENDIF
++!  print *,'Smf=',smf(i,j),i,j
++!  print *,'Budget',budget(i,j),i,j
++!  print *,'RUNOFF2= ', i,j,runoff2(i,j)
++!  print *,'Water budget ', i,j,waterbudget(i,j),'wb=',wb
++!  print *,'rainbl,qfx*dt,runoff1,smelt*dt*1.e3,smchange', &
++!          i,j,rainbl(i,j),qfx(i,j)*dt,runoff1(i,j)*dt*1.e3, &
++!          smelt(i,j)*dt*1.e3, &
++!          (smavail(i,j)-smtotold(i,j))
++!
++!  print *,'SNOW,SNOWold',i,j,snwe,snowold(i,j)
++!  print *,'SNOW-SNOWold',i,j,max(0.,snwe-snowold(i,j))
++!  print *,'CANWATold, canwat ',i,j,canwatold(i,j),canwat(i,j)
++!  print *,'canwat(i,j)-canwatold(i,j)',max(0.,canwat(i,j)-canwatold(i,j))
++!    ENDIF
+ 
+ 
+     IF (debug_print ) THEN
++     if (abs(xlat-testptlat).lt.0.2 .and.   &
++         abs(xlon-testptlon).lt.0.2)then
+    print *,'LAND, i,j,tso1d,soilm1d,soilt - end of time step',         &
+                   i,j,tso1d,soilm1d,soilt(i,j)
+    print *,'LAND, QFX, HFX after SFCTMP', i,j,lh(i,j),hfx(i,j)
++     endif
+     ENDIF
+ 
+ !--- end of a land or sea ice point
+@@ -1169,6 +1258,7 @@
+ !! the snow "mosaic" approach is turned on.
+ !! - Updates emissivity and albedo for patch snow.
+    SUBROUTINE SFCTMP (debug_print, delt,ktau,conflx,i,j,         & !--- input variables
++                xlat,xlon,testptlat,testptlon,                   &
+                 nzs,nddzs,nroot,meltfactor,                      &
+                 ILAND,ISOIL,IVGTYP,ISLTYP,PRCPMS,                &
+                 NEWSNMS,SNWE,SNHEI,SNOWFRAC,                     &
+@@ -1177,7 +1267,7 @@
+                 PATM,TABS,QVATM,QCATM,rho,                       &
+                 GLW,GSWdn,GSW,EMISS,EMISBCK,QKMS,TKMS,PC,        &
+                 MAVAIL,CST,VEGFRA,ALB,ZNT,                       &
+-                ALB_SNOW,ALB_SNOW_FREE,lai,                      &
++                ALB_SNOW,ALB_SNOW_FREE,lai,hgt,stdev,            &
+                 MYJ,SEAICE,ISICE,                                &
+                 QWRTZ,rhocs,dqm,qmin,ref,wilt,psis,bclh,ksat,    & !--- soil fixed fields
+                 sat,cn,zsmain,zshalf,DTDZS,DTDZS2,tbq,           &
+@@ -1199,7 +1289,8 @@
+    INTEGER,  INTENT(IN   )   ::  isice,i,j,nroot,ktau,nzs ,      &
+                                  nddzs                             !nddzs=2*(nzs-2)
+ 
+-   REAL,     INTENT(IN   )   ::  DELT,CONFLX,meltfactor
++   REAL,     INTENT(IN   )   ::  DELT,CONFLX,meltfactor,xlat,xlon
++   REAL,     INTENT(IN   )   ::  testptlat,testptlon
+    REAL,     INTENT(IN   )   ::  C1SN,C2SN
+    LOGICAL,    INTENT(IN   )    ::     myj, debug_print
+ !--- 3-D Atmospheric variables
+@@ -1216,6 +1307,7 @@
+                                                          VEGFRA, &
+                                                   ALB_SNOW_FREE, &
+                                                             lai, &
++                                                      hgt,stdev, &
+                                                          SEAICE, &
+                                                             RHO, &
+                                                            QKMS, &
+@@ -1367,6 +1459,8 @@
+ 
+    INTEGER ::  K,ILNB
+ 
++   integer ::  isncovr_opt
++
+    REAL    ::  BSN, XSN                                        , &
+                RAINF, SNTH, NEWSN, PRCPMS, NEWSNMS             , &
+                T3, UPFLUX, XINET
+@@ -1388,11 +1482,23 @@
+                  SNWE,RHOSN,SNOM,SMELT,TS1D
+     ENDIF
+ 
++     !-- Snow fraction options
++     !-- option 1: original formulation using critical snow depth to compute
++     !-- snow fraction
++     !-- option 2: the tanh formulation from Niu,G.-Y.,and Yang,Z.-L. 2007,JGR,DOI:10.1029/2007JD008674.
++        isncovr_opt = 1
++     !--
++     !-- SNHEI_CRIT is a threshold for fractional snow in isncovr_opt=1
++         snhei_crit=0.01601*1.e3/rhosn
++         snhei_crit_newsn=0.0005*1.e3/rhosn
++     !--
++        zntsn = z0tbl(isice)
+         snow_mosaic=0.
+         snfr = 1.
+         NEWSN=0.
+         newsnowratio = 0.
+         snowfracnewsn=0.
++        rhonewsn = 100.
+         if(snhei == 0.) snowfrac=0.
+         smelt = 0.
+         RAINF = 0.
+@@ -1464,17 +1570,13 @@
+        if(bsn*snwe*100..lt.1.e-4) goto 777
+         XSN=rhosn*(exp(bsn*snwe*100.)-1.)/(bsn*snwe*100.)
+         rhosn=MIN(MAX(58.8,XSN),500.)
+-!13mar18        rhosn=MIN(MAX(76.9,XSN),500.)
+-!        rhosn=MIN(MAX(62.5,XSN),890.)
+-!        rhosn=MIN(MAX(100.,XSN),400.)
+-!        rhosn=MIN(MAX(50.,XSN),400.)
+  777   continue
+-
+-!      else
+-!        rhosn     =200.
+-!        rhonewsn  =200.
+       endif
+ 
++      !-- snow_mosaic from the previous time step 
++      if(snowfrac < 0.75) snow_mosaic = 1.
++      !if(snowfrac < 0.9) snow_mosaic = 1.
++
+            newsn=newsnms*delt
+ !---- ACSNOW - run-total snowfall water [mm]
+            acsnow=acsnow+newsn*1.e3
+@@ -1488,18 +1590,12 @@
+ 
+         newsnowratio = min(1.,newsn/(snwe+newsn))
+ 
+-!*** Calculate fresh snow density (t > -15C, else MIN value)
+-!*** Eq. 10 from Koren et al. (1999)
+-!--- old formulation from Koren (1999)
+-!        if(tabs.lt.258.15) then
+-!          rhonewsn=50.
+-!          rhonewsn=100.
+-!          rhonewsn=62.5
+-
+-!        else
+-!          rhonewsn=MIN(rhonewsn,400.)
+-!        endif
+-!--- end of old formulation
++        if(isncovr_opt == 2) then
++        !-- update snow fraction for fresh snowfall (Swenson&Lawrence,JGR,2012)
++        !   time-step snowfall [mm H2O], 0.1 - accumulation constant (unitless)
++          snowfrac = snowfrac + tanh(0.1*newsn*1.e3)*(1.-snowfrac) ! eq. 8.1 from CLM5
++          if(debug_print) print *,'2 - snowfrac newsn', i,j,ktau,snowfrac
++        endif
+ 
+ !--- 27 Feb 2014 - empirical formulations from John M. Brown
+ !        rhonewsn=min(250.,rhowater/max(4.179,(13.*tanh((274.15-Tabs)*0.3333))))
+@@ -1524,15 +1620,6 @@
+          xsn=(rhosn*snwe+rhonewsn*newsn)/                         &
+              (snwe+newsn)
+          rhosn=MIN(MAX(58.8,XSN),500.)
+-!13mar18         rhosn=MIN(MAX(76.9,XSN),500.)
+-!         rhosn=MIN(MAX(100.,XSN),500.)
+-!         rhosn=MIN(MAX(50.,XSN),400.)
+-
+-!Update snow on the ground
+-!         snwe=snwe+newsn
+-!         newsnowratio = min(1.,newsn/snwe)
+-!         snhei=snwe*rhowater/rhosn
+-!         NEWSN=NEWSN*rhowater/rhonewsn
+        ENDIF ! end NEWSN > 0.
+ 
+        IF(PRCPMS.NE.0.) THEN
+@@ -1553,9 +1640,6 @@
+ ! J. of Hydrometeorology, 2006, CLM.
+          interw=0.25*DELT*PRCPMS*(1.-exp(-0.5*lai))*vegfrac
+          intersn=0.25*NEWSN*(1.-exp(-0.5*lai))*vegfrac
+-!original - next 2 lines
+-!         interw=DELT*PRCPMS*vegfrac
+-!         intersn=NEWSN*vegfrac
+          infwater=PRCPMS - interw/delt
+     if((interw+intersn) > 0.) then
+        intwratio=interw/(interw+intersn)
+@@ -1564,7 +1648,6 @@
+ ! Update water/snow intercepted by the canopy
+          dd1=CST + interw + intersn
+          CST=DD1
+-!  if(i==666.and.j==282)  print *,'666,282 - cst,sat,interw,intersn',cst,sat,interw,intersn
+         IF(CST.GT.SAT) THEN
+           CST=SAT
+           DRIP=DD1-SAT
+@@ -1577,12 +1660,6 @@
+          infwater=PRCPMS
+      endif ! vegfrac > 0.01
+ 
+-! SNHEI_CRIT is a threshold for fractional snow
+-         SNHEI_CRIT=0.01601*1.e3/rhosn
+-         SNHEI_CRIT_newsn=0.0005*1.e3/rhosn
+-! snowfrac from the previous time step
+-         SNOWFRAC=MIN(1.,SNHEI/(2.*SNHEI_CRIT))
+-        if(snowfrac < 0.75) snow_mosaic = 1.
+ 
+        IF(NEWSN.GT.0.) THEN
+ !Update snow on the ground
+@@ -1619,9 +1696,11 @@
+ !         SNHEI_CRIT_newsn=0.001*1.e3/rhosn
+ !    endif
+ 
+-         SNOWFRAC=MIN(1.,SNHEI/(2.*SNHEI_CRIT))
+-!24nov15 - SNOWFRAC for urban category < 0.75 
+-      if(ivgtyp == urban) snowfrac=min(0.75,snowfrac)
++      if(isncovr_opt == 1) then
++      !-- update snow cover with accounting for fresh snow
++        snowfrac=min(1.,snhei/(2.*snhei_crit))
++      endif
++
+ !      if(meltfactor > 1.5) then
+ !         if(isltyp > 9 .and. isltyp < 13) then
+ !24nov15 clay soil types - SNOFRAC < 0.9
+@@ -1632,13 +1711,19 @@
+ !         snowfrac=min(0.85,snowfrac)
+ !      endif
+ 
+-!         SNOWFRAC=MIN(1.,SNHEI/(2.*SNHEI_CRIT))
+-!       elseif(snowfrac < 0.3 .and. tabs > 275.) then
+-!       if(snowfrac < 0.3.and. tabs > 275.) snow_mosaic = 1.
++       if(newsn > 0. ) then
++         SNOWFRACnewsn=MIN(1.,SNHEI/SNHEI_CRIT_newsn)
++       endif
+ 
+-       if(snowfrac < 0.75) snow_mosaic = 1.
++       !-- due to steep slopes and blown snow, limit snow fraction in the
++       !-- mountains to 0.85 (based on Swiss weather model over the Alps)
++       if(hgt > 2500. .and. ivgtyp == glacier) snowfrac=min(0.85,snowfrac)
++
++       !24nov15 - SNOWFRAC for urban category < 0.75 
++       if(ivgtyp == urban) snowfrac=min(0.75,snowfrac)
+ 
+-       if(newsn > 0. ) SNOWFRACnewsn=MIN(1.,SNHEI/SNHEI_CRIT_newsn)
++       if(snowfrac < 0.75) snow_mosaic = 1.
++       !if(snowfrac < 0.9) snow_mosaic = 1.
+ 
+          KEEP_SNOW_ALBEDO = 0.
+       IF (NEWSN > 0. .and. snowfracnewsn > 0.99) THEN
+@@ -1660,14 +1745,14 @@
+ 
+ !-- Set znt for snow from VEGPARM table (snow/ice landuse), except for
+ !-- land-use types with higher roughness (forests, urban).
+-!5mar12      IF(znt.lt.0.2 .and. snowfrac.gt.0.99) znt=z0tbl(iland)
+-!      IF(newsn==0. .and. znt.lt.0.2 .and. snowfrac.gt.0.99) znt=z0tbl(iland)
+       IF(newsn.eq.0. .and. znt.le.0.2 .and. IVGTYP.ne.isice) then
+          if( snhei .le. 2.*ZNT)then
++         ! shallow snow
+            znt=0.55*znt+0.45*z0tbl(iland)
+          elseif( snhei .gt. 2.*ZNT .and. snhei .le. 4.*ZNT)then
+            znt=0.2*znt+0.8*z0tbl(iland)
+          elseif(snhei > 4.*ZNT) then
++         ! deep snow
+            znt=z0tbl(iland)
+          endif
+        ENDIF
+@@ -1790,7 +1875,7 @@
+        
+           ilands = ivgtyp
+ 
+-         CALL SOIL(debug_print,                                 &
++         CALL SOIL(debug_print,xlat,xlon,                       &
+ !--- input variables
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,   &
+             PRCPMS,RAINF,PATM,QVATM,QCATM,GLW,GSWnew,gswin,     &
+@@ -1836,7 +1921,7 @@
+           runoff1s=0.
+           runoff2s=0.
+  
+-          CALL SICE(debug_print,                                &
++          CALL SICE(debug_print,xlat,xlon,                      &
+ !--- input variables
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,   &
+             PRCPMS,RAINF,PATM,QVATM,QCATM,GLW,GSWnew,           &
+@@ -1904,7 +1989,7 @@
+            else
+               snfr=snowfrac
+            endif
+-         CALL SNOWSOIL (debug_print,                            & !--- input variables
++         CALL SNOWSOIL (debug_print,xlat,xlon,                  & !--- input variables
+             i,j,isoil,delt,ktau,conflx,nzs,nddzs,nroot,         &
+             meltfactor,rhonewsn,SNHEI_CRIT,                     &  ! new
+             ILAND,PRCPMS,RAINF,NEWSN,snhei,SNWE,snfr,           &
+@@ -1934,7 +2019,7 @@
+               snfr=snowfrac
+            endif
+ 
+-         CALL SNOWSEAICE (debug_print,                          &
++         CALL SNOWSEAICE (debug_print,xlat,xlon,                 &
+             i,j,isoil,delt,ktau,conflx,nzs,nddzs,               &    
+             meltfactor,rhonewsn,SNHEI_CRIT,                     &  ! new
+             ILAND,PRCPMS,RAINF,NEWSN,snhei,SNWE,snfr,           &    
+@@ -1992,6 +2077,7 @@
+       print *,' Ground flux on snow-free land', i,j,ss
+       print *,' CSTS, CST', i,j,csts,cst
+    ENDIF
++
+             do k=1,nzs
+           soilm1d(k) = soilm1ds(k)*(1.-snowfrac) + soilm1d(k)*snowfrac
+           ts1d(k) = ts1ds(k)*(1.-snowfrac) + ts1d(k)*snowfrac
+@@ -2092,9 +2178,59 @@
+        endif      
+      endif ! snow_mosaic = 1.
+  
+-!  run-total accumulated snow based on snowfall and snowmelt in [m]
++      !-- 13 jan 2022
++      !  update snow fraction after melting (Swenson, S.C. and Lawrence, 2012,
++      !  JGR, DOI:10.1029/2012MS000165 
++      !  
++      !if (snwe > 0.) then
++      !  if(smelt > 0.) then
++        !update snow fraction after melting
++          !n_melt = 200./max(10.,topo_std)
++      !    snowfrac = max(0.,snowfrac - (acos(min(1.,(2.*(smelt*delt/snwe) -
++      !    1.)))/piconst)**10)
++          !snowfrac = 1. - (acos(min(1.,(2.*(smelt*delt/snwe) -
++          !1.)))/piconst)**10.
++      !    if(i==744.and.j==514 .or. i==924.and.j==568)then
++           !print *,'smr,n_melt,topo_std', smr,n_melt,topo_std
++      !     print *,'3 - snowfrac end', i,j,ktau,snowfrac,smelt*delt, snwe,
++      !     piconst
++      !    endif
++      !  endif
++      !else
++      !  snowfrac = 0.
++      !endif
++      ! 
++      !-- The NY07 parameterization gives more realistic snow cover fraction
++      !   than SL12
++      !-- 13 Jan 2022
++      !-- update snow fraction after metlting (Niu, G.-Y., and Yang, Z.-L. 2007,
++      !JGR,
++      !   DOI:10.1029/2007JD008674)
++      !   Limit on znt (<0.25) is needed to avoid very small snow fractions in the
++      !   forested areas with large roughness
++
++      if(isncovr_opt == 1) then
++      !-- update snow cover after possible melting
++        snowfrac=min(1.,snhei/(2.*snhei_crit))
++      else
++      !-- isncovr_opt=2
++        if(ivgtyp == glacier .or. ivgtyp == bare) then
++        !-- sparsely vegetated or land ice
++          snowfrac = tanh( snhei/(2.5 * 0.25 *(rhosn/rhonewsn)**1.0))
++        else
++          snowfrac = tanh( snhei/(2.5 *min(0.25,znt) *(rhosn/rhonewsn)**1.0))
++        endif
++      endif
++
++      !-- due to steep slopes and blown snow, limit snow fraction in the
++      !-- mountains ( Swiss weather model)
++      if(hgt > 2500. .and. ivgtyp == glacier) snowfrac=min(0.85,snowfrac)
++
++      if(ivgtyp == urban) snowfrac=min(0.75,snowfrac)
++
++!  run-total accumulated snow based on snowfall and snowmelt in [mm]
+ 
+-      snowfallac = snowfallac + max(0.,(newsn - rhowater/rhonewsn*smelt*delt*newsnowratio))
++      snowfallac = snowfallac + max(0.,(newsn - rhowater/rhonewsn*smelt*delt*newsnowratio))*1.e3
+ 
+    ELSE
+ !--- no snow
+@@ -2113,7 +2249,7 @@
+ 
+        if(SEAICE .LT. 0.5) then
+ !  LAND
+-         CALL SOIL(debug_print,                                 &
++         CALL SOIL(debug_print,xlat,xlon,                       &
+ !--- input variables
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,   &
+             PRCPMS,RAINF,PATM,QVATM,QCATM,GLW,GSWnew,GSWin,     &
+@@ -2140,7 +2276,7 @@
+          alb=albice
+          RNET    = GSWnew + XINET
+ 
+-          CALL SICE(debug_print,                                &
++          CALL SICE(debug_print,xlat,xlon,                       &
+ !--- input variables
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,   &
+             PRCPMS,RAINF,PATM,QVATM,QCATM,GLW,GSWnew,           &
+@@ -2211,7 +2347,7 @@
+ !>\ingroup lsm_ruc_group
+ !> This subroutine calculates energy and moisture budget for vegetated surfaces
+ !! without snow, heat diffusion and Richards eqns in soil.
+-        SUBROUTINE SOIL (debug_print,                        &
++        SUBROUTINE SOIL (debug_print,xlat,xlon,              &
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,& !--- input variables
+             PRCPMS,RAINF,PATM,QVATM,QCATM,                   &
+             GLW,GSW,GSWin,EMISS,RNET,                        &
+@@ -2293,7 +2429,7 @@
+    INTEGER,  INTENT(IN   )   ::  nroot,ktau,nzs                , &
+                                  nddzs                    !nddzs=2*(nzs-2)
+    INTEGER,  INTENT(IN   )   ::  i,j,iland,isoil
+-   REAL,     INTENT(IN   )   ::  DELT,CONFLX
++   REAL,     INTENT(IN   )   ::  DELT,CONFLX,xlat,xlon
+    LOGICAL,  INTENT(IN   )   ::  myj
+ !--- 3-D Atmospheric variables
+    REAL,                                                         &
+@@ -2548,7 +2684,7 @@
+ !--- water, and DRYCAN is the fraction of vegetated area where
+ !--- transpiration may take place.
+ 
+-          WETCAN=min(0.25,(CST/SAT)**CN)
++          WETCAN=min(0.25,max(0.,(CST/SAT))**CN)
+ !          if(lai > 1.) wetcan=wetcan/lai
+           DRYCAN=1.-WETCAN
+ 
+@@ -2584,7 +2720,7 @@
+ ! field capacity
+ ! 20jun18 - beta in Eq. (5) is called soilres in the code - it limits soil evaporation
+ ! when soil moisture is below field capacity.  [Lee and Pielke, 1992]
+-! This formulation agrees with obsevations when top layer is < 2 cm thick.
++! This formulation agrees with observations when top layer is < 2 cm thick.
+ ! Soilres = 1 for snow, glaciers and wetland.
+ !        fc=ref  - suggested in the paper
+ !        fc=max(qmin,ref*0.5) ! used prior to 20jun18 change
+@@ -2614,27 +2750,8 @@
+ !**************************************************************
+ !  SOILTEMP soilves heat budget and diffusion eqn. in soil
+ !**************************************************************
+- if(1==2) then
+-      print *,'i,j,iland,isoil ', i,j,iland,isoil
+-      print *,'delt,ktau,conflx,nzs,nddzs,nroot ',delt,ktau,conflx,nzs,nddzs,nroot
+-      print *,'PRCPMS,RAINF ',PRCPMS,RAINF
+-      print *,'PATM,TABS,QVATM,QCATM,EMISS,RNET ',PATM,TABS,QVATM,QCATM,EMISS,RNET 
+-      print *,'QKMS,TKMS,PC,rho,vegfrac, lai ',QKMS,TKMS,PC,rho,vegfrac, lai
+-      print *,'thdif ',thdif
+-      print *,'cap ',cap
+-      print *,'drycan,wetcan ',drycan,wetcan
+-      print *,'transum,dew,soilres,alfa ',transum,dew,soilres,alfa
+-      print *,'mavail ',mavail
+-      print *,'dqm,qmin,bclh,zsmain,zshalf,DTDZS',dqm,qmin,bclh,zsmain,zshalf,DTDZS
+-      print *,'xlv,CP,G0_P,cvw,stbolt ',xlv,CP,G0_P,cvw,stbolt
+-      print *,'tso=',tso
+-      print *,'soilt=',soilt
+-      print *,'qvg=',qvg
+-      print *,'qsg=',qsg
+-      print *,'qcg=',qcg
+- endif ! 1==2
+ 
+-        CALL SOILTEMP(debug_print,                            &
++        CALL SOILTEMP(debug_print,xlat,xlon,                  &
+ !--- input variables
+              i,j,iland,isoil,                                 &
+              delt,ktau,conflx,nzs,nddzs,nroot,                &
+@@ -2650,15 +2767,6 @@
+ !--- output variables
+              tso,soilt,qvg,qsg,qcg,x)
+ 
+-if(1==2) then
+-      print *,'after tso=',tso
+-      print *,'after soilt=',soilt
+-      print *,'after qvg=',qvg
+-      print *,'after qsg=',qsg
+-      print *,'after qcg=',qcg
+-      print *,'after x=',x
+-endif
+-
+ !************************************************************************
+ 
+ !--- CALCULATION OF DEW USING NEW VALUE OF QSG OR TRANSP IF NO DEW
+@@ -2866,7 +2974,7 @@
+ !! on its surface. it solves heat diffusion inside ice and energy
+ !! budget at the surface of ice. It computes skin temperature and
+ !! temerature inside sea ice.
+-        SUBROUTINE SICE ( debug_print,                          &
++        SUBROUTINE SICE ( debug_print,xlat,xlon,                &
+             i,j,iland,isoil,delt,ktau,conflx,nzs,nddzs,nroot,   & !--- input variables
+             PRCPMS,RAINF,PATM,QVATM,QCATM,GLW,GSW,              &
+             EMISS,RNET,QKMS,TKMS,rho,myj,                       &
+@@ -2890,7 +2998,7 @@
+    INTEGER,  INTENT(IN   )   ::  nroot,ktau,nzs                , &
+                                  nddzs                    !nddzs=2*(nzs-2)
+    INTEGER,  INTENT(IN   )   ::  i,j,iland,isoil
+-   REAL,     INTENT(IN   )   ::  DELT,CONFLX
++   REAL,     INTENT(IN   )   ::  DELT,CONFLX,xlat,xlon
+    LOGICAL,  INTENT(IN   )   ::  myj, debug_print
+ !--- 3-D Atmospheric variables
+    REAL,                                                         &
+@@ -3038,7 +3146,7 @@
+                  tn,aa1,bb,pp,fkq,r210
+     ENDIF
+         QGOLD=QSG
+-        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+ !--- it is saturation over sea ice
+         QVG=QS1
+         QSG=QS1
+@@ -3134,7 +3242,7 @@
+ !! solves energy and moisture budgets on the surface of snow, and 
+ !! on the interface of snow and soil. It computes skin temperature,
+ !! snow temperature, snow depth and snow melt.
+-        SUBROUTINE SNOWSOIL ( debug_print,                     &
++        SUBROUTINE SNOWSOIL ( debug_print,xlat,xlon,           &
+              i,j,isoil,delt,ktau,conflx,nzs,nddzs,nroot,       & !--- input variables
+              meltfactor,rhonewsn,SNHEI_CRIT,                   & ! new
+              ILAND,PRCPMS,RAINF,NEWSNOW,snhei,SNWE,SNOWFRAC,   &
+@@ -3234,7 +3342,7 @@
+ 
+    REAL,     INTENT(IN   )   ::  DELT,CONFLX,PRCPMS            , &
+                                  RAINF,NEWSNOW,RHONEWSN,         &
+-                                 SNHEI_CRIT,meltfactor
++                                 SNHEI_CRIT,meltfactor,xlat,xlon
+ 
+    LOGICAL,    INTENT(IN   )    ::     myj
+ 
+@@ -3546,7 +3654,7 @@
+  
+         SMELT=0.
+ !        DD1=0.
+-        H=1.
++        H=MAVAIL ! =1. if snowfrac=1
+ 
+         FQ=QKMS
+ 
+@@ -3573,7 +3681,7 @@
+             SNWE=0.
+          ENDIF
+ 
+-          WETCAN=min(0.25,(CST/SAT)**CN)
++          WETCAN=min(0.25,max(0.,(CST/SAT))**CN)
+ !          if(lai > 1.) wetcan=wetcan/lai
+           DRYCAN=1.-WETCAN
+ 
+@@ -3601,7 +3709,7 @@
+     IF (debug_print ) THEN
+ print *, 'TSO before calling SNOWTEMP: ', tso
+     ENDIF
+-        CALL SNOWTEMP(debug_print,                            &
++        CALL SNOWTEMP(debug_print,xlat,xlon,                  &
+ !--- input variables
+              i,j,iland,isoil,                                 &
+              delt,ktau,conflx,nzs,nddzs,nroot,                &
+@@ -3823,7 +3931,7 @@
+ !! its surface. It solves energy budget on the snow interface with 
+ !! atmosphere and snow interface with ice. It calculates skin 
+ !! temperature, snow and ice temperatures, snow depth and snow melt.
+-           SUBROUTINE SNOWSEAICE( debug_print,                  &
++           SUBROUTINE SNOWSEAICE( debug_print,xlat,xlon,        &
+             i,j,isoil,delt,ktau,conflx,nzs,nddzs,               &
+             meltfactor,rhonewsn,SNHEI_CRIT,                     &  ! new
+             ILAND,PRCPMS,RAINF,NEWSNOW,snhei,SNWE,snowfrac,     &
+@@ -3856,7 +3964,7 @@
+ 
+    REAL,     INTENT(IN   )   ::  DELT,CONFLX,PRCPMS            , &
+                                  RAINF,NEWSNOW,RHONEWSN,         &
+-                                 meltfactor, snhei_crit
++                                 meltfactor,snhei_crit,xlat,xlon
+    real                      ::  rhonewcsn
+ 
+    LOGICAL,  INTENT(IN   )   ::  myj
+@@ -3958,8 +4066,9 @@
+    REAL,     DIMENSION(1:NZS)  ::  cotso,rhtso
+ 
+    REAL                   :: RNET,rsmfrac,soiltfrac,hsn,icemelt,rr
+-   integer                ::      nmelt
++   integer                ::      nmelt, isncond_opt
+ 
++   REAL                   :: keff
+ 
+ !-----------------------------------------------------------------
+         XLMELT=3.35E+5
+@@ -3967,6 +4076,12 @@
+         XLVm=XLV+XLMELT
+ !        STBOLT=5.670151E-8
+ 
++        !-- options for snow conductivity:
++        !-- 1 - constant
++        !-- opt 2 -  Sturm et al., 1997
++        isncond_opt = 1
++        keff = 0.265
++
+ !--- SNOW flag -- ISICE
+ !         ILAND=isice
+ 
+@@ -4006,7 +4121,16 @@
+         RHOCSN=2090.* RHOSN
+ !18apr08 - add rhonewcsn
+         RHOnewCSN=2090.* RHOnewSN
++
++      if(isncond_opt == 1) then
+         THDIFSN = 0.265/RHOCSN
++      else
++!07Jun19 - snow thermal conductivity from the paper by Sturm et al., 1997 - K_eff
++        keff = 10. ** (2.650 * RHOSN*1.e-3 - 1.652)
++        THDIFSN = keff/rhocsn
++        !print *,'1 keff,rhosn,rhocsn,THDIFSN ',i,j,keff,rhosn,rhocsn,THDIFSN
++        !-- old version THDIFSN = 0.265/RHOCSN
++      endif
+         RAS=RHO*1.E-3
+ 
+         SOILTFRAC=SOILT
+@@ -4231,14 +4355,17 @@
+         print *,'TABS,QVATM,TN,QVG=',TABS,QVATM,TN,QVG
+     ENDIF
+ 
+-        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+ !--- it is saturation over snow
+         QVG=QS1
+         QSG=QS1
+         QCG=0.
+ 
+-!--- SOILT - skin temperature
++!--- SOILT - skin temperature of snow on ice
+         SOILT=TS1
++     if(nmelt==1 .and. snowfrac==1) then
++       soilt = min(273.15,soilt)
++     endif
+ 
+     IF (debug_print ) THEN
+         print *,' AFTER VILKA-SNOW on SEAICE'
+@@ -4440,7 +4567,15 @@
+ !13mar18         rhosn=MIN(MAX(76.9,XSN),500.)
+ 
+         RHOCSN=2090.* RHOSN
+-        thdifsn = 0.265/RHOCSN
++        if(isncond_opt == 1) then
++          !-- old version thdifsn = 0.265/RHOCSN
++          THDIFSN = 0.265/RHOCSN
++        else
++!07Jun19 - snow thermal conductivity from the paper by Sturm et al., 1997 - K_eff
++          keff = 10. ** (2.650 * RHOSN*1.e-3 - 1.652)
++          thdifsn = keff/RHOCSN
++        endif
++
+         endif
+       endif
+ 
+@@ -4578,7 +4713,7 @@
+ !>\ingroup lsm_ruc_group
+ !> This subroutine solves energy budget equation and heat diffusion
+ !! equation.
+-           SUBROUTINE SOILTEMP( debug_print,                &
++           SUBROUTINE SOILTEMP( debug_print,xlat,xlon,      &
+            i,j,iland,isoil,                                 & !--- input variables
+            delt,ktau,conflx,nzs,nddzs,nroot,                &
+            PRCPMS,RAINF,PATM,TABS,QVATM,QCATM,              &
+@@ -4648,7 +4783,7 @@
+    INTEGER,  INTENT(IN   )   ::  nroot,ktau,nzs                , &
+                                  nddzs                         !nddzs=2*(nzs-2)
+    INTEGER,  INTENT(IN   )   ::  i,j,iland,isoil
+-   REAL,     INTENT(IN   )   ::  DELT,CONFLX,PRCPMS, RAINF
++   REAL,     INTENT(IN   )   ::  DELT,CONFLX,PRCPMS, RAINF,xlat,xlon
+    REAL,     INTENT(INOUT)   ::  DRYCAN,WETCAN,TRANSUM
+ !--- 3-D Atmospheric variables
+    REAL,                                                         &
+@@ -4803,7 +4938,7 @@
+ !        AA1=AA*alfa+CC
+         PP=PATM*1.E3
+         AA1=AA1/PP
+-        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+         TQ2=QVATM
+         TX2=TQ2*(1.-H)
+         Q1=TX2+H*QS1
+@@ -4826,7 +4961,7 @@
+   100   BB=BB-AA*TX2
+         AA=(AA*H+CC)/PP
+ 
+-        CALL VILKA(TN,AA,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++        CALL VILKA(TN,AA,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+         Q1=TX2+H*QS1
+     IF (debug_print ) THEN
+ !     if(i.eq.279.and.j.eq.263) then
+@@ -4901,7 +5036,7 @@
+ !>\ingroup lsm_ruc_group
+ !> This subroutine solves energy bugdget equation and heat diffusion 
+ !! equation to obtain snow and soil temperatures.
+-           SUBROUTINE SNOWTEMP( debug_print,                       &
++           SUBROUTINE SNOWTEMP( debug_print,xlat,xlon,             &
+            i,j,iland,isoil,                                        & !--- input variables
+            delt,ktau,conflx,nzs,nddzs,nroot,                       &
+            snwe,snwepr,snhei,newsnow,snowfrac,                     &
+@@ -4979,7 +5114,7 @@
+    REAL,     INTENT(IN   )   ::  DELT,CONFLX,PRCPMS            , &
+                                  RAINF,NEWSNOW,DELTSN,SNTH     , &
+                                  TABS,TRANSUM,SNWEPR           , &
+-                                 rhonewsn,meltfactor
++                                 rhonewsn,meltfactor,xlat,xlon
+    real                      ::  rhonewcsn
+ 
+ !--- 3-D Atmospheric variables
+@@ -5087,13 +5222,19 @@
+                                                             qfx, &
+                                                             hfx
+ 
+-   REAL                        :: RNET,rsmfrac,soiltfrac,hsn,rr
+-   integer                     ::      nmelt, iter
++   REAL                        :: RNET,rsmfrac,soiltfrac,hsn,rr,keff
++   integer                     :: nmelt, iter, isncond_opt
+ 
+ !-----------------------------------------------------------------
+ 
+        iter = 0
+ 
++       !-- options for snow conductivity:
++       !-- 1 - constant
++       !-- opt 2 -  Sturm et al., 1997
++       isncond_opt = 1
++       keff = 0.265
++
+        do k=1,nzs
+           transp   (k)=0.
+           cotso    (k)=0.
+@@ -5107,7 +5248,16 @@
+         RHOCSN=2090.* RHOSN
+ !18apr08 - add rhonewcsn
+         RHOnewCSN=2090.* RHOnewSN
++        if(isncond_opt == 1) then
++          !-- old version thdifsn = 0.265/RHOCSN
+         THDIFSN = 0.265/RHOCSN
++        else
++!07Jun19 - thermal conductivity from the paper by Sturm et al., 1997 - K_eff
++          keff = 10. ** (2.650 * RHOSN*1.e-3 - 1.652)
++          THDIFSN = keff/rhocsn
++          !print *,'2 keff,rhosn,rhocsn,THDIFSN ',i,j,keff,rhosn,rhocsn,THDIFSN
++        endif
++
+         RAS=RHO*1.E-3
+ 
+         SOILTFRAC=SOILT
+@@ -5175,8 +5325,8 @@
+          cotsn=cotso(NZS)
+          rhtsn=rhtso(NZS)
+ !*** Average temperature of snow pack (C)
+-         tsnav=0.5*(soilt+tso(1))                                     &
+-                     -273.15
++         tsnav=min(0.,0.5*(soilt+tso(1))                              &
++                     -273.15)
+ 
+         else
+ !-- 2 layers in snow, SOILT1 is temperasture at DELTSN depth
+@@ -5204,9 +5354,9 @@
+          cotsn=x1sn/denomsn
+          rhtsn=(ftsnow+X1SN1*rhtso(NZS))/denomsn
+ !*** Average temperature of snow pack (C)
+-         tsnav=0.5/snhei*((soilt+soilt1)*deltsn                       &
++         tsnav=min(0.,0.5/snhei*((soilt+soilt1)*deltsn                &
+                      +(soilt1+tso(1))*(SNHEI-DELTSN))                 &
+-                     -273.15
++                     -273.15)
+         endif
+        ENDIF
+        IF(SNHEI.LT.SNTH.AND.SNHEI.GT.0.) then
+@@ -5227,8 +5377,8 @@
+          denom = 1. + x1sn + x2 - x2*cotso(nzs-2)
+          cotso(nzs1) = x1sn/denom
+          rhtso(nzs1)=(FT+X2*rhtso(NZS-2))/denom
+-         tsnav=0.5*(soilt+tso(1))                                    &
+-                     -273.15
++         tsnav=min(0.,0.5*(soilt+tso(1))                             &
++                     -273.15)
+          cotso(NZS)=cotso(nzs1)
+          rhtso(NZS)=rhtso(nzs1)
+          cotsn=cotso(NZS)
+@@ -5245,7 +5395,7 @@
+         ETT1=0.
+         EPOT=-QKMS*(QVATM-QGOLD)
+         RHCS=CAP(1)
+-        H=1.
++        H=MAVAIL !1.
+         TRANS=TRANSUM*DRYCAN/ZSHALF(NROOT+1)
+         CAN=WETCAN+TRANS
+         UMVEG=1.-VEGFRAC
+@@ -5334,7 +5484,14 @@
+         AA1=AA1/PP
+         BB=BB-SNOH/TDENOM
+ 
+-        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++      IF (debug_print ) THEN
++        if (abs(xlat-42.05).lt.0.5 .and.   &
++            abs(xlon-286.75).lt.0.5)then
++          print *,'1-', i,tn,aa1,bb,pp,ktau,newsnow,snwe,snhei,soilt,soilt1,tso,rhosn,rhonewcsn
++          print *,'2-', i,tdenom,fkq,vegfrac,can,tabs,R210,D10,R21,D9sn,D1sn,R22sn,R7,prcpms
++        endif
++      ENDIF
++        CALL VILKA(TN,AA1,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+         TQ2=QVATM
+         TX2=TQ2*(1.-H)
+         Q1=TX2+H*QS1
+@@ -5353,7 +5510,7 @@
+         GOTO 200
+   100   BB=BB-AA*TX2
+         AA=(AA*H+CC)/PP
+-        CALL VILKA(TN,AA,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil)
++        CALL VILKA(TN,AA,BB,PP,QS1,TS1,TBQ,KTAU,i,j,iland,isoil,xlat,xlon)
+         Q1=TX2+H*QS1
+     IF (debug_print ) THEN
+      print *,'VILKA2 - TS1,QS1,H,TX2,Q1',TS1,QS1,TQ2,H,TX2,Q1
+@@ -5380,16 +5537,27 @@
+       iter=1
+ !      goto 2211
+   endif
+-endif ! 1==2
+ 
+     IF (debug_print ) THEN
+      if(iter==1) then
+        print *,'SNOW - QVATM,QVG,QSG,QCG,TS1',QVATM,QVG,QSG,QCG,TS1
+      endif
+     ENDIF
++endif ! 1==2
+ 
+ !--- SOILT - skin temperature
+         SOILT=TS1
++     if(nmelt==1 .and. snowfrac==1) then
++     !--7feb22 on the second iteration when SNOH is known,
++     !-- check if the snow skin temperature is <273.15K
++     !-- when a grid cells is fully covered with snow and snow_mosaic=0.
++     !-- or with partial snow cover and snow_mosaic=1.
++       if (debug_print ) then
++         print *,'soilt is too high =',i,j,soilt
++         soilt = min(273.15,soilt)
++       endif
++     endif
++
+     IF (debug_print ) THEN
+ !     IF(i.eq.266.and.j.eq.447) then
+             print *,'snwe,snhei,soilt,soilt1,tso',i,j,snwe,snhei,soilt,soilt1,tso
+@@ -5405,14 +5573,14 @@
+         else
+ !-- 1 layer in snow
+           TSO(1)=rhtso(NZS)+cotso(NZS)*SOILT
+-          SOILT1=TSO(1)
++          SOILT1=min(273.15,TSO(1))
+           tsob=tso(1)
+         endif
+        ELSEIF (SNHEI > 0. .and. SNHEI < SNTH) THEN
+ ! blended 
+          TSO(2)=rhtso(NZS1)+cotso(NZS1)*SOILT
+          tso(1)=(tso(2)+(soilt-tso(2))*fso)
+-         SOILT1=TSO(1)
++         SOILT1=min(273.15,TSO(1))
+          tsob=TSO(2)
+        ELSE
+ !-- very thin or zero snow. If snow is thin we suppose that
+@@ -5612,7 +5780,14 @@
+ !          rhosn=MIN(MAX(76.9,XSN),500.)
+ 
+           RHOCSN=2090.* RHOSN
+-          thdifsn = 0.265/RHOCSN
++          if(isncond_opt == 1) then
++            !-- old version thdifsn = 0.265/RHOCSN
++            THDIFSN = 0.265/RHOCSN
++          else
++!07Jun19 - snow thermal conductivity from the paper by Sturm et al., 1997 - K_eff
++            keff = 10. ** (2.650 * RHOSN*1.e-3 - 1.652)
++            thdifsn = keff / rhocsn
++          endif
+         endif  
+        endif
+ 
+@@ -5716,14 +5891,14 @@
+ 
+       IF(SNHEI.GT.0.) THEN
+         if(ilnb.gt.1) then
+-          tsnav=0.5/snhei*((soilt+soilt1)*deltsn                     &
++          tsnav=min(0.,0.5/snhei*((soilt+soilt1)*deltsn          &
+                     +(soilt1+tso(1))*(SNHEI-DELTSN))                 &
+-                       -273.15
++                       -273.15)
+         else
+-          tsnav=0.5*(soilt+tso(1)) - 273.15
++          tsnav=min(0.,0.5*(soilt+tso(1)) - 273.15)
+         endif
+       ELSE
+-          tsnav= soilt - 273.15
++          tsnav= min(0.,soilt - 273.15)
+       ENDIF
+ 
+ !------------------------------------------------------------------------
+@@ -5929,7 +6104,7 @@
+ 
+ !        TOTLIQ=UMVEG*PRCP-DRIP/DELT-UMVEG*DEW*RAS-SMELT
+ 
+-        TOTLIQ=PRCP-DRIP/DELT-UMVEG*DEW*RAS-SMELT
++        TOTLIQ=PRCP-DRIP/DELT-(1.-VEGFRAC)*DEW*RAS-SMELT
+     IF (debug_print ) THEN
+ print *,'UMVEG*PRCP,DRIP/DELT,UMVEG*DEW*RAS,SMELT', &
+          UMVEG*PRCP,DRIP/DELT,UMVEG*DEW*RAS,SMELT
+@@ -6522,13 +6697,13 @@
+ !> This subroutine finds the solution of energy budget at the surface
+ !! from the pre-computed table of saturated water vapor mixing ratio 
+ !! and estimated surface temperature.
+-       SUBROUTINE VILKA(TN,D1,D2,PP,QS,TS,TT,NSTEP,ii,j,iland,isoil)
++       SUBROUTINE VILKA(TN,D1,D2,PP,QS,TS,TT,NSTEP,ii,j,iland,isoil,xlat,xlon)
+ !--------------------------------------------------------------
+ !--- VILKA finds the solution of energy budget at the surface
+ !--- using table T,QS computed from Clausius-Klapeiron
+ !--------------------------------------------------------------
+    REAL,     DIMENSION(1:5001),  INTENT(IN   )   ::  TT
+-   REAL,     INTENT(IN  )   ::  TN,D1,D2,PP
++   REAL,     INTENT(IN  )   ::  TN,D1,D2,PP,xlat,xlon
+    INTEGER,  INTENT(IN  )   ::  NSTEP,ii,j,iland,isoil
+ 
+    REAL,     INTENT(OUT  )  ::  QS, TS
+@@ -6551,12 +6726,12 @@
+        IF(I1.NE.I) GOTO 10
+        TS=T1-.05*RN
+        QS=(TT(I)+(TT(I)-TT(I+1))*RN)/PP
+-!   print *,'in VILKA - TS,QS',ts,qs
+        GOTO 20
+ !   1   PRINT *,'Crash in surface energy budget - STOP'
+    1   PRINT *,'     AVOST IN VILKA     Table index= ',I
+ !       PRINT *,TN,D1,D2,PP,NSTEP,I,TT(i),ii,j,iland,isoil
+        print *,'I,J=',ii,j,'LU_index = ',iland, 'Psfc[hPa] = ',pp, 'Tsfc = ',tn
++       print *,'AVOST point at xlat/xlon=',xlat,xlon
+ !       CALL wrf_error_fatal ('  Crash in surface energy budget  ' )
+    20  CONTINUE
+ !-----------------------------------------------------------------------
+@@ -7309,6 +7484,8 @@
+            READ (19,*)
+            READ (19,*)BARE
+            READ (19,*)
++           READ (19,*)GLACIER
++           READ (19,*)
+            READ (19,*)NATURAL
+            READ (19,*)
+            READ (19,*)CROP
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/namelist_soilveg_ruc.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/namelist_soilveg_ruc.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/namelist_soilveg_ruc.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/namelist_soilveg_ruc.F90	2022-06-14 18:25:42.000000000 +0000
+@@ -32,6 +32,7 @@
+       REAL CFACTR_DATA
+       REAL RSMAX_DATA
+       INTEGER BARE
++      INTEGER GLACIER
+       INTEGER NATURAL
+       INTEGER CROP
+       INTEGER URBAN
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/set_soilveg_ruc.F90 update-rrfs-dev-20220614/FV3/ccpp/physics/physics/set_soilveg_ruc.F90
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/set_soilveg_ruc.F90	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/set_soilveg_ruc.F90	2022-06-14 18:25:42.000000000 +0000
+@@ -29,7 +29,7 @@
+      &  PCTBL, SHDTBL,                                                  &
+      &  IFORTBL, RSTBL, RGLTBL, HSTBL, SNUPTBL, LAITBL, MAXALB,         &
+      &  LPARAM, TOPT_DATA, CMCMAX_DATA, CFACTR_DATA,                    &
+-     &  RSMAX_DATA, BARE, NATURAL, CROP, URBAN,                         &
++     &  RSMAX_DATA, BARE, GLACIER, NATURAL, CROP, URBAN,                &
+      &  DEFINED_VEG, DEFINED_SOIL, DEFINED_SLOPE,                       &
+      &  BB, DRYSMC, HC, MAXSMC, REFSMC, SATPSI, SATDK, SATDW,           &
+      &  WLTSMC, QTZ, mosaic_soil, mosaic_lu,                            &
+@@ -195,9 +195,10 @@
+      &                0.,  0.,  0.,  0.,  0.,  0./) 
+ 
+       natural = 10
+-      bare = 16
+       crop = 12
+       urban = 13
++      glacier = 15
++      bare = 16
+       endif
+ !  end if veg table
+ 
+@@ -337,7 +338,8 @@
+      &            0.236, 0.000, 0.000, 0.000, 0.000, 0.000,       &
+      &            0.000, 0.000, 0.000, 0.000, 0.000, 0.000/)
+ 
+-      SATPSI   =(/0.121, 0.090, 0.218, 0.786, 0.786, 0.478,       &
++      SATPSI   =(/0.121, 0.150, 0.218, 0.786, 0.786, 0.478,       &
++      !SATPSI   =(/0.121, 0.090, 0.218, 0.786, 0.786, 0.478,       &
+      &            0.299, 0.356, 0.630, 0.153, 0.490, 0.405,       &
+      &            0.478, 0.000, 0.121, 0.218, 0.468, 0.069,       &
+      &            0.069, 0.00,  0.00,  0.00,  0.00,  0.00,        &
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/sfc_diag.f update-rrfs-dev-20220614/FV3/ccpp/physics/physics/sfc_diag.f
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/sfc_diag.f	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/sfc_diag.f	2022-06-14 18:25:42.000000000 +0000
+@@ -21,30 +21,41 @@
+ !!  \section general General Algorithm
+ !!  \section detailed Detailed Algorithm
+ !!  @{
+-      subroutine sfc_diag_run                                           &
+-     &                   (im,grav,cp,eps,epsm1,ps,u1,v1,t1,q1,prslki,   &
+-     &                    evap,fm,fh,fm10,fh2,tskin,qsurf,thsfc_loc,    &
+-     &                    f10m,u10m,v10m,t2m,q2m,errmsg,errflg          &
++      subroutine sfc_diag_run (im,xlat_d,xlon_d,                        &
++     &                    lsm,lsm_ruc,grav,cp,eps,epsm1,rocp,           &
++     &                    wet,shflx,chs2,cqs2,cdq,wind,                 &
++     &                    zf,ps,u1,v1,t1,q1,prslki,evap,fm,fh,fm10,fh2, &
++     &                    tskin,qsurf,thsfc_loc,diag_flux,diag_log,     &
++     &                    f10m,u10m,v10m,t2m,q2m,dpt2m,errmsg,errflg    &
+      &                   )
+ !
+       use machine , only : kind_phys
+       use funcphys, only : fpvs
+       implicit none
+ !
+-      integer, intent(in) :: im
++      integer, intent(in) :: im, lsm, lsm_ruc
+       logical, intent(in) :: thsfc_loc  ! Flag for reference pot. temp.
+-      real(kind=kind_phys), intent(in) :: grav,cp,eps,epsm1
++      logical, intent(in) :: diag_flux  ! Flag for flux method in 2-m diagnostics
++      logical, intent(in) :: diag_log   ! Flag for 2-m log diagnostics under stable conditions
++      real(kind=kind_phys), intent(in) :: grav,cp,eps,epsm1,rocp
+       real(kind=kind_phys), dimension(:), intent(in) ::                 &
+-     &                       ps, u1, v1, t1, q1, tskin,                 &
+-     &                       qsurf, prslki, evap, fm, fh, fm10, fh2
++     &                      zf, ps, u1, v1, t1, q1, tskin, wet,         &
++     &                      qsurf, prslki, evap, fm, fh, fm10, fh2,     &
++     &                      shflx, chs2, cqs2, cdq, wind, xlat_d, xlon_d
+       real(kind=kind_phys), dimension(:), intent(out) ::                &
+-     &                       f10m, u10m, v10m, t2m, q2m
++     &                       f10m, u10m, v10m, t2m, q2m, dpt2m
+       character(len=*), intent(out) :: errmsg
+       integer,          intent(out) :: errflg
+ !
+ !     locals
+ !
++      logical :: debug_print
+       real(kind=kind_phys), parameter :: qmin=1.0e-8
++      real(kind=kind_phys) :: q1c, qv, tem, qv1, th2m, x2m, rho
++      real(kind=kind_phys) :: dT, dQ, qsfcmr, qsfcprox, ff, fac, dz1
++      real(kind=kind_phys) :: t2_alt, q2_alt
++      real(kind=kind_phys) :: thcon, cqs, chs
++      real(kind=kind_phys) :: testptlat, testptlon
+       integer :: k,i
+ !
+       real(kind=kind_phys) :: fhi, qss, wrk
+@@ -55,6 +66,12 @@
+       ! Initialize CCPP error handling variables
+       errmsg = ''
+       errflg = 0
++
++      !--
++      testptlat = 35.3 !41.02 !42.05 !39.0 !74.12 !29.5 
++      testptlon = 273.0 !284.50 !286.75 !280.6 !164.0 !283.0 
++      !--
++      debug_print = .false.
+ !
+ !     estimate sigma ** k at 2 m
+ !
+@@ -64,6 +81,8 @@
+ !  ps is in pascals
+ !
+ !!
++
++
+       do i = 1, im
+         f10m(i) = fm10(i) / fm(i)
+ !       f10m(i) = min(f10m(i),1.)
+@@ -75,23 +94,134 @@
+ !       t2m(i)  = t2m(i) * sig2k
+         wrk     = 1.0 - fhi
+ 
++        thcon    = (1.e5/ps(i))**rocp    
++       !-- make sure 1st level q is not higher than saturated value
++        qss    = fpvs(t1(i))
++        qss    = eps * qss / (ps(i) + epsm1 * qss)
++        q1c    = min(q1(i),qss) ! lev 1 spec. humidity
++
++        qv1    = q1c / (1. - q1c) ! lev 1 mixing ratio
++        qsfcmr   = qsurf(i)/(1. - qsurf(i)) ! surface mixing ratio
++        chs = cdq(i) * wind(i)
++        cqs = chs
++        qsfcprox = max(qmin,qv1 + evap(i)/cqs) ! surface mix. ratio computed from the flux
+ 
++        if(.not. diag_flux) then
++        !-- original method
++          if(lsm /= lsm_ruc) then
+         if(thsfc_loc) then ! Use local potential temperature
+           t2m(i)  = tskin(i)*wrk + t1(i)*prslki(i)*fhi - (grav+grav)/cp
+         else ! Use potential temperature referenced to 1000 hPa
+           t2m(i)  = tskin(i)*wrk + t1(i)*fhi - (grav+grav)/cp
+         endif
+-
+         if(evap(i) >= 0.) then !  for evaporation>0, use inferred qsurf to deduce q2m
+-          q2m(i) = qsurf(i)*wrk + max(qmin,q1(i))*fhi
++              q2m(i) = qsurf(i)*wrk + max(qmin,q1c)*fhi
+         else                   !  for dew formation, use saturated q at tskin
+           qss    = fpvs(tskin(i))
+           qss    = eps * qss / (ps(i) + epsm1 * qss)
+-          q2m(i) = qss*wrk + max(qmin,q1(i))*fhi
++              q2m(i) = qss*wrk + max(qmin,q1c)*fhi
+         endif
++          else
++          !-- RUC lsm
++            !if(chs.lt.1.E-5) then
++            !-- under very stable conditions use first level temperature
++            !  t2m(i) = t1(i)
++            !else
++              t2m(i)  = tskin(i)*wrk + t1(i)*fhi - (grav+grav)/cp
++            !endif
++        
++            !if(cqs.lt.1.E-5) then
++            !  q2m(i)=max(qmin,q1c) ! spec. humidity
++            !else
++              q2m(i) = qsurf(i)*wrk + max(qmin,q1c)*fhi
++            !endif
++          endif ! RUC lsm
++
++        else
++        !-- flux method
++          !if(chs2(i).lt.1.E-5) then
++          !-- under very stable conditions use first level temperature
++          !  t2m(i) = t1(i)
++          !else
++            th2m = tskin(i)*thcon - shflx(i)/chs2(i)
++            t2m(i) = th2m/thcon
++          !endif
++
++          !if(cqs2(i).lt.1.E-5) then
++          !-- under very stable conditions use first level for 2-m mixing ratio
++          !  q2m(i)=max(qmin,q1c) ! spec. humidity
++          !else
++            x2m = max(qmin,qsfcprox - evap(i)/cqs2(i)) ! mix. ratio
++            q2m(i) = x2m/(1. + x2m) ! spec. humidity
++          !endif
++
++          if(diag_log) then
++          !-- Alternative logarithmic diagnostics:
++            dT = t1(i) - tskin(i)
++            dQ = qv1 - qsfcmr
++            dz1= zf(i) ! level of atm. forcing
++            IF (dT > 0.) THEN
++              ff  = MIN(MAX(1.-dT/10.,0.01), 1.0)
++              !for now, set zt = 0.05
++              fac = LOG((2.  + .05)/(0.05 + ff))/                       &
++     &            LOG((dz1 + .05)/(0.05 + ff))
++              T2_alt = tskin(i) + fac * dT
++            ELSE
++            !no alternatives (yet) for unstable conditions
++              T2_alt = t2m(i)
++            ENDIF
++
++            IF (dQ > 0.) THEN
++              ff  = MIN(MAX(1.-dQ/0.003,0.01), 1.0)
++              !-- for now, set zt = 0.05
++              fac = LOG((2.  + .05)/(0.05 + ff))/                       &
++     &              LOG((dz1 + .05)/(0.05 + ff))
++              Q2_alt = qsfcmr + fac * dQ ! mix. ratio
++              Q2_alt = Q2_alt/(1. + Q2_alt) ! spec. humidity
++            ELSE
++              !no alternatives (yet) for unstable conditions
++              Q2_alt = q2m(i)
++            ENDIF
++            !-- Note: use of alternative diagnostics will make 
++            !   it cooler and drier with stable stratification
++            t2m(i) = T2_alt  
++            q2m(i) = Q2_alt
++          endif ! log method for stable regime
++        endif ! flux method
++
++        !-- check that T2m values lie in the range between tskin and t1
++        x2m     = max(min(tskin(i),t1(i)) , t2m(i))
++        t2m(i)  = min(max(tskin(i),t1(i)) , x2m)
++        !-- check that Q2m values lie in the range between qsurf and q1
++        x2m    = max(min(qsurf(i),q1c) , q2m(i))
++        q2m(i) = min(max(qsurf(i),q1c) , x2m)
++
++        !-- make sure q2m is not oversaturated
+         qss    = fpvs(t2m(i))
+         qss    = eps * qss / (ps(i) + epsm1 * qss)
+         q2m(i) = min(q2m(i),qss)
++
++        ! Compute dew point, using vapor pressure
++        qv  = max(qmin,(q2m(i)/(1.-q2m(i))))
++        tem = max(ps(i) * qv/( eps - epsm1 *qv), 1.e-8)
++        dpt2m(i) = 243.5/( ( 17.67 / log(tem/611.2) ) - 1.) + 273.14
++        dpt2m(i) = min(dpt2m(i),t2m(i))
++       
++
++        if (debug_print) then
++        !-- diagnostics for a test point with known lat/lon
++          if (abs(xlat_d(i)-testptlat).lt.0.2 .and.                     &
++     &      abs(xlon_d(i)-testptlon).lt.0.2)then
++            print 100,'(ruc_lsm_diag)  i=',i,                           &
++     &      '  lat,lon=',xlat_d(i),xlon_d(i),'zf ',zf(i),               &
++     &      'tskin ',tskin(i),'t2m ',t2m(i),'t1',t1(i),'shflx',shflx(i),&
++     &      'qsurf ',qsurf(i),'qsfcprox ',qsfcprox,'q2m ',q2m(i),       &
++     &      'q1 ',q1(i),'evap ',evap(i),'dpt2m ',dpt2m(i),              &
++     &      'chs2 ',chs2(i),'cqs2 ',cqs2(i),'cqs ',cqs,'cdq',cdq(i)
++          endif
++        endif
++ 100    format (";;; ",a,i4,a,2f14.7/(4(a10,'='es11.4)))
++
+       enddo
+ 
+       return
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/physics/physics/sfc_diag.meta update-rrfs-dev-20220614/FV3/ccpp/physics/physics/sfc_diag.meta
+--- gsl-develop-20220614/FV3/ccpp/physics/physics/sfc_diag.meta	2022-06-14 17:50:19.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/physics/physics/sfc_diag.meta	2022-06-14 18:25:42.000000000 +0000
+@@ -14,6 +14,36 @@
+   dimensions = ()
+   type = integer
+   intent = in
++[xlat_d]
++  standard_name = latitude_in_degree
++  long_name = latitude in degree north
++  units = degree_north
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[xlon_d]
++  standard_name = longitude_in_degree
++  long_name = longitude in degree east
++  units = degree_east
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[lsm]
++  standard_name = control_for_land_surface_scheme
++  long_name = flag for land surface model
++  units = flag
++  dimensions = ()
++  type = integer
++  intent = in
++[lsm_ruc]
++  standard_name = identifier_for_ruc_land_surface_scheme
++  long_name = flag for RUC land surface model
++  units = flag
++  dimensions = ()
++  type = integer
++  intent = in
+ [grav]
+   standard_name = gravitational_acceleration
+   long_name = gravitational acceleration
+@@ -46,6 +76,30 @@
+   type = real
+   kind = kind_phys
+   intent = in
++[rocp]
++  standard_name = ratio_of_gas_constant_dry_air_to_specific_heat_of_dry_air_at_constant_pressure
++  long_name = (rd/cp)
++  units = none
++  dimensions = ()
++  type = real
++  kind = kind_phys
++  intent = in
++[wet]
++  standard_name = normalized_soil_wetness_for_land_surface_model
++  long_name = normalized soil wetness
++  units = frac
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[zf]
++  standard_name = height_above_ground_at_lowest_model_layer
++  long_name = layer 1 height above ground (not MSL)
++  units = m
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
+ [ps]
+   standard_name = surface_air_pressure
+   long_name = surface pressure
+@@ -71,7 +125,7 @@
+   kind = kind_phys
+   intent = in
+ [t1]
+-  standard_name = air_temperature_of_new_state_at_surface_adjacent_layer
++  standard_name = air_temperature_at_surface_adjacent_layer
+   long_name = 1st model layer air temperature
+   units = K
+   dimensions = (horizontal_loop_extent)
+@@ -79,7 +133,7 @@
+   kind = kind_phys
+   intent = in
+ [q1]
+-  standard_name = specific_humidity_of_new_state_at_surface_adjacent_layer
++  standard_name = specific_humidity_at_surface_adjacent_layer
+   long_name = 1st model layer specific humidity
+   units = kg kg-1
+   dimensions = (horizontal_loop_extent)
+@@ -157,6 +211,60 @@
+   dimensions = ()
+   type = logical
+   intent = in
++[diag_flux]
++  standard_name = flag_for_flux_method_in_2m_diagnostics
++  long_name = flag for flux method in 2-m diagnostics
++  units = flag
++  dimensions = ()
++  type = logical
++  intent = in
++[diag_log]
++  standard_name = flag_for_log_method_in_2m_diagnostics
++  long_name = flag for log method in 2-m diagnostics
++  units = flag
++  dimensions = ()
++  type = logical
++  intent = in
++[shflx]
++  standard_name = surface_upward_temperature_flux
++  long_name = kinematic surface upward sensible heat flux
++  units = K m s-1
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[chs2]
++  standard_name = surface_exchange_coefficient_for_heat_at_2m
++  long_name = exchange coefficient for heat at 2 meters
++  units = m s-1
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[cqs2]
++  standard_name = surface_exchange_coefficient_for_moisture_at_2m
++  long_name = exchange coefficient for moisture at 2 meters
++  units = m s-1
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[cdq]
++  standard_name = surface_drag_coefficient_for_heat_and_moisture_in_air
++  long_name = surface exchange coeff heat & moisture
++  units = none
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
++[wind]
++  standard_name = wind_speed_at_lowest_model_layer
++  long_name = wind speed at lowest model level
++  units = m s-1
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
++  intent = in
+ [f10m]
+   standard_name = ratio_of_wind_at_surface_adjacent_layer_to_wind_at_10m
+   long_name = ratio of fm10 and fm
+@@ -196,6 +304,14 @@
+   dimensions = (horizontal_loop_extent)
+   type = real
+   kind = kind_phys
++  intent = out
++[dpt2m]
++  standard_name = dewpoint_temperature_at_2m
++  long_name = 2 meter dewpoint temperature
++  units = K
++  dimensions = (horizontal_loop_extent)
++  type = real
++  kind = kind_phys
+   intent = out
+ [errmsg]
+   standard_name = ccpp_error_message
+Only in update-rrfs-dev-20220614/FV3/ccpp/physics: x.diff
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/ccpp/suites/suite_FV3_HAFS_v0_thompson_tedmf_gfdlsf.xml update-rrfs-dev-20220614/FV3/ccpp/suites/suite_FV3_HAFS_v0_thompson_tedmf_gfdlsf.xml
+--- gsl-develop-20220614/FV3/ccpp/suites/suite_FV3_HAFS_v0_thompson_tedmf_gfdlsf.xml	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/ccpp/suites/suite_FV3_HAFS_v0_thompson_tedmf_gfdlsf.xml	2022-06-14 21:09:03.000000000 +0000
+@@ -75,7 +75,11 @@
+       <scheme>cnvc90</scheme>
+       <scheme>GFS_MP_generic_pre</scheme>
+       <scheme>mp_thompson_pre</scheme>
++    </subcycle>
++    <subcycle loop="2">
+       <scheme>mp_thompson</scheme>
++    </subcycle>
++    <subcycle loop="1">
+       <scheme>mp_thompson_post</scheme>
+       <scheme>GFS_MP_generic_post</scheme>
+       <scheme>maximum_hourly_diagnostics</scheme>
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/CMakeLists.txt update-rrfs-dev-20220614/FV3/CMakeLists.txt
+--- gsl-develop-20220614/FV3/CMakeLists.txt	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/CMakeLists.txt	2022-06-14 21:02:23.000000000 +0000
+@@ -49,6 +49,8 @@
+   cpl/module_cplfields.F90
+   cpl/module_cap_cpl.F90
+   io/FV3GFS_io.F90
++  io/FV3GFS_io_netcdf.F90
++  io/FV3GFS_io_generic.F90
+   io/module_write_netcdf.F90
+   io/module_fv3_io_def.F90
+   io/module_write_internal_state.F90
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/FV3/.gitmodules update-rrfs-dev-20220614/FV3/.gitmodules
+--- gsl-develop-20220614/FV3/.gitmodules	2022-06-14 17:49:58.000000000 +0000
++++ update-rrfs-dev-20220614/FV3/.gitmodules	2022-06-14 18:25:27.000000000 +0000
+@@ -9,7 +9,7 @@
+ [submodule "ccpp/physics"]
+   path = ccpp/physics
+   url = https://github.com/NOAA-GSL/ccpp-physics
+-  branch = gsl/develop
++  branch = RRFS_dev
+ [submodule "upp"]
+   path = upp
+   url = https://github.com/NOAA-EMC/UPP
+Only in update-rrfs-dev-20220614/FV3/io: FV3GFS_io_generic.F90
+Only in update-rrfs-dev-20220614/FV3/io: FV3GFS_io_netcdf.F90
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/.gitmodules update-rrfs-dev-20220614/.gitmodules
+--- gsl-develop-20220614/.gitmodules	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/.gitmodules	2022-06-14 21:20:22.000000000 +0000
+@@ -1,7 +1,7 @@
+ [submodule "FV3"]
+   path = FV3
+   url = https://github.com/NOAA-GSL/fv3atm
+-  branch = gsl/develop
++  branch = RRFS_dev
+ [submodule "WW3"]
+   path = WW3
+   url = https://github.com/NOAA-EMC/WW3
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/modulefiles/ufs_hera.intel update-rrfs-dev-20220614/modulefiles/ufs_hera.intel
+--- gsl-develop-20220614/modulefiles/ufs_hera.intel	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/modulefiles/ufs_hera.intel	2022-06-14 21:18:02.000000000 +0000
+@@ -20,6 +20,7 @@
+ 
+ module load hpc-intel/18.0.5.274
+ module load hpc-impi/2018.0.4
++#module swap impi/2021.3.0
+ 
+ module load ufs_common
+ 
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/modulefiles/ufs_hera.intel_debug update-rrfs-dev-20220614/modulefiles/ufs_hera.intel_debug
+--- gsl-develop-20220614/modulefiles/ufs_hera.intel_debug	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/modulefiles/ufs_hera.intel_debug	2022-06-14 18:24:39.000000000 +0000
+@@ -20,6 +20,7 @@
+ 
+ module load hpc-intel/18.0.5.274
+ module load hpc-impi/2018.0.4
++#module swap impi/2021.3.0
+ 
+ module load ufs_common_debug
+ 
+Only in update-rrfs-dev-20220614/tests: build_fv3_allsuites
+Only in update-rrfs-dev-20220614/tests: build_fv3_stuffnthings
+Only in update-rrfs-dev-20220614/tests: #default_vars.sh#
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/tests/default_vars.sh update-rrfs-dev-20220614/tests/default_vars.sh
+--- gsl-develop-20220614/tests/default_vars.sh	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/tests/default_vars.sh	2022-06-14 21:54:09.000000000 +0000
+@@ -822,6 +822,7 @@
+ export DIAG_TABLE=diag_table_gfsv16
+ export FIELD_TABLE=field_table_gfsv16
+ 
++export USE_IO_NETCDF=.false.
+ export DOMAINS_STACK_SIZE=3000000
+ 
+ # Coldstart/warmstart
+Only in update-rrfs-dev-20220614/tests: doit.sh
+Only in update-rrfs-dev-20220614/tests/fv3_conf: compile_slurm.IN
+Only in update-rrfs-dev-20220614/tests/fv3_conf: fv3_slurm.IN
+Only in update-rrfs-dev-20220614/tests: log_hera.gnu
+Only in update-rrfs-dev-20220614/tests: notes
+Only in update-rrfs-dev-20220614/tests: #rt.conf#
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/tests/rt.sh update-rrfs-dev-20220614/tests/rt.sh
+--- gsl-develop-20220614/tests/rt.sh	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/tests/rt.sh	2022-06-15 05:14:25.000000000 +0000
+@@ -257,7 +257,7 @@
+ 
+   #ACCNR="${ACCNR:-fv3-cpu}
+   PARTITION=
+-  dprefix=/scratch1/NCEPDEV
++  dprefix=${dprefix:-/scratch1/NCEPDEV}
+   DISKNM=/scratch2/BMC/wrfruc/RT
+   #DISKNM=$dprefix/nems/emc.nemspara/RT
+   STMP=$dprefix/stmp4
+@@ -488,9 +488,9 @@
+ 
+ BL_DATE=20220613
+ if [[ $MACHINE_ID = hera.* ]] || [[ $MACHINE_ID = orion.* ]] || [[ $MACHINE_ID = cheyenne.* ]] || [[ $MACHINE_ID = gaea.* ]] || [[ $MACHINE_ID = jet.* ]] || [[ $MACHINE_ID = s4.* ]]; then
+-  RTPWD=${RTPWD:-$DISKNM/NEMSfv3gfs/gsl-develop-${BL_DATE}/${RT_COMPILER^^}}
++  RTPWD=${RTPWD:-$DISKNM/NEMSfv3gfs/RRFS_dev-${BL_DATE}/${RT_COMPILER^^}}
+ else
+-  RTPWD=${RTPWD:-$DISKNM/NEMSfv3gfs/gsl-develop-${BL_DATE}}
++  RTPWD=${RTPWD:-$DISKNM/NEMSfv3gfs/RRFS_dev-${BL_DATE}}
+ fi
+ 
+ INPUTDATA_ROOT=${INPUTDATA_ROOT:-$DISKNM/NEMSfv3gfs/input-data-20220414}
+diff -rwU3 --exclude .git --exclude '*log' --exclude '*~' --exclude __pycache__ gsl-develop-20220614/tests/run_test.sh update-rrfs-dev-20220614/tests/run_test.sh
+--- gsl-develop-20220614/tests/run_test.sh	2022-06-14 17:48:35.000000000 +0000
++++ update-rrfs-dev-20220614/tests/run_test.sh	2022-06-14 21:18:01.000000000 +0000
+@@ -365,5 +365,22 @@
+   fi
+ fi
+ 
++################################################################################
++# Remove RUN_DIRs if they are no longer needed by other tests
++################################################################################
++if [[ ${delete_rundir} = true ]]; then
++  keep_run_dir=false
++  while  read -r line; do
++    keep_test=$(echo $line| sed -e 's/^ *//' -e 's/ *$//')
++    if [[ $TEST_NAME == ${keep_test} ]]; then
++      keep_run_dir=true
++    fi
++  done < ${PATHRT}/keep_tests.tmp
++
++  if [[ ${keep_run_dir} == false ]]; then
++    rm -rf ${RUNDIR}
++  fi
++fi
++
+ elapsed=$SECONDS
+ echo "Elapsed time $elapsed seconds. Test ${TEST_NAME}"
+Only in update-rrfs-dev-20220614/tests/tests: cpld_bmark_p8~HEAD
+Only in update-rrfs-dev-20220614/tests/tests: cpld_bmark_p8~origin_gsl_develop
+Only in update-rrfs-dev-20220614/tests/tests: cpld_control_c96_p8~HEAD
+Only in update-rrfs-dev-20220614/tests/tests: cpld_control_c96_p8~origin_gsl_develop
+Only in update-rrfs-dev-20220614/tests/tests: cpld_control_p8~HEAD
+Only in update-rrfs-dev-20220614/tests/tests: cpld_control_p8~origin_gsl_develop
+Only in update-rrfs-dev-20220614/tests/tests: cpld_debug_p8~HEAD
+Only in update-rrfs-dev-20220614/tests/tests: cpld_debug_p8~origin_gsl_develop
+Only in update-rrfs-dev-20220614/tests/tests: regional_control_2dwrtdecomp~HEAD
