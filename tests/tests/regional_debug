@@ -40,3 +40,5 @@ WRTTASK_PER_GROUP=8
 NTILES=1
 
 export WLCLK=30
+
+export DIAG_FLUX=.true.

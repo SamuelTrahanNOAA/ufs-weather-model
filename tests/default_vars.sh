@@ -924,7 +924,6 @@ export DO_MYNNEDMF=.false.
 export DO_MYJPBL=.false.
 export HURR_PBL=.false.
 export MONINQ_FAC=1.0
-export SFCLAY_COMPUTE_FLUX=.false.
 
 # Shallow/deep convection
 export DO_DEEP=.true.
@@ -943,6 +942,8 @@ export FSCAV_AERO="'*:0.0'"
 # SFC
 export DO_MYJSFC=.false.
 export DO_MYNNSFCLAY=.false.
+export SFCLAY_COMPUTE_FLUX=.false.
+export DIAG_FLUX=.false.
 
 # LSM
 export LSM=1

@@ -50,3 +50,5 @@ export LSM=3
 export LSOIL_LSM=9
 export KICE=9
 
+
+export DIAG_FLUX=.true.

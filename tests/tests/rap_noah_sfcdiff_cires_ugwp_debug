@@ -46,3 +46,5 @@ export IMFDEEPCNV=3
 export LSM=1
 export LSOIL_LSM=4
 
+
+export DIAG_FLUX=.true.

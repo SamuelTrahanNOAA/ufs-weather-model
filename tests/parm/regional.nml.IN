@@ -116,6 +116,7 @@
 /
 
  &gfs_physics_nml
+       diag_flux      = @[DIAG_FLUX]
        fhzero         = 6.
        ldiag3d        = .false.
        lradar         = .true.

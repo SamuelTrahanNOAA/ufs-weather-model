@@ -103,3 +103,4 @@ export CCPP_SUITE=FV3_RAP_RRTMGP
 export DO_RRTMGP=.true.
 export DOGP_CLDOPTICS_LUT=.true.
 export DOGP_LWSCAT=.true.
+export DIAG_FLUX=.true.
