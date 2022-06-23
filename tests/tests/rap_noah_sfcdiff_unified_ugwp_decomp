@@ -95,5 +95,3 @@ export DO_TOFD=.true.
 export GWD_OPT=2
 export DO_GSL_DRAG_SS=.true.
 export DO_GSL_DRAG_TOFD=.true.
-
-export DIAG_FLUX=.true.
