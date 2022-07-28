@@ -29,3 +29,5 @@ setenv FC mpiifort
 setenv CMAKE_Platform hera.intel
 
 setenv I_MPI_DAPL_UD 1
+
+setenv IFI_DIR /scratch2/BMC/wrfruc/Samuel.Trahan/fip/UPP_IFI/install

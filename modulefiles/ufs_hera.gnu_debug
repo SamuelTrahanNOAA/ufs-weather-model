@@ -27,3 +27,5 @@ setenv CC mpicc
 setenv CXX mpicxx
 setenv FC mpif90
 setenv CMAKE_Platform hera.gnu
+
+setenv IFI_DIR /scratch2/BMC/wrfruc/Samuel.Trahan/fip/UPP_IFI/install
