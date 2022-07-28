@@ -78,10 +78,11 @@ if(CMAKE_Platform)
   endif()
 endif()
 
-option(BUILD_WITH_IFI "Build NCEPpost with In-Flight Icing (IFI) library if present" ON)
+option(BUILD_WITH_IFI "Build NCEPpost with In-Flight Icing (IFI) library if present" OFF)
 option(REQUIRE_IFI "Abort if libIFI is not found ; enables BUILD_WITH_IFI=ON" OFF)
 if(REQUIRE_IFI)
   set(BUILD_WITH_IFI ON)
+  add_definition(-DUSE_IFI=1)
 endif()
 
 if(BUILD_WITH_IFI)
