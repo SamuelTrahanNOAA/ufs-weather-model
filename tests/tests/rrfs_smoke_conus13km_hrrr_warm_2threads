@@ -9,7 +9,7 @@
 
 export TEST_DESCR="HRRR smoke physics on 13km domain, control run"
 
-export CNTL_DIR=rrfs_smoke_conus13km_hrrr_warm_2threads
+export CNTL_DIR=rrfs_smoke_conus13km_hrrr_warm
 
 export LIST_FILES="sfcf000.nc \
                    sfcf001.nc \
