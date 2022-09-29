@@ -150,12 +150,8 @@
     grid_file = 'INPUT/grid_spec.nc'
 /
 
-
-
-    ! sfclay_compute_flux = @[SFCLAY_COMPUTE_FLUX]
-    ! fh_dfi_radar = @[FH_DFI_RADAR]
-
 &gfs_physics_nml
+    fh_dfi_radar = @[FH_DFI_RADAR]
     bl_mynn_edmf = 1
     bl_mynn_edmf_mom = 1
     bl_mynn_tkeadvect = .true.
