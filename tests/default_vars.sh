@@ -1703,8 +1703,8 @@ fi
 
 export SYEAR=2021
 export SMONTH=7
-export SDAY=25
-export SHOUR=0
+export SDAY=24
+export SHOUR=12
 export FHMAX=2
 export DT_ATMOS=120
 export QUILTING=.true.
