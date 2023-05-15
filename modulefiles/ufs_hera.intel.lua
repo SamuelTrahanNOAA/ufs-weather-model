@@ -36,6 +36,6 @@ setenv("FC", "mpiifort")
 setenv("CMAKE_Platform", "hera.intel")
 
 prepend_path("MODULEPATH", "/scratch2/BMC/ifi/modulefiles")
-try_load("ifi/20230118-intel-2022.1.2")
+try_load("ifi/20230511-intel-2022.1.2")
 
 whatis("Description: UFS build environment")

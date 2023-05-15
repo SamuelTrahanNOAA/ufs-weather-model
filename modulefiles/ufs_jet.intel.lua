@@ -27,6 +27,6 @@ setenv("FC", "mpiifort")
 setenv("CMAKE_Platform", "jet.intel")
 
 prepend_path("MODULEPATH", "/lfs4/BMC/ifi/modulefiles")
-try_load("ifi/20230118-intel-2022.1.2")
+try_load("ifi/20230511-intel-2022.1.2")
 
 whatis("Description: UFS build environment")
